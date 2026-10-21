@@ -1,0 +1,27 @@
+# Variables de entorno y secretos (claves de API)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Dependencias
+node_modules/
+package-lock.json
+
+# Logs y depuración
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Archivos temporales del sistema y del editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos de prueba / scratch
+scratch*
+*.tmp
