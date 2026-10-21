@@ -52,9 +52,20 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/matches') {
       const date = parseDate(url.searchParams.get('date'));
       const tz = url.searchParams.get('tz') || 'America/Bogota';
-      const { fixtures, dropped } = cleanFixtures(await provider.getFixtures(date, tz));
-      fixtures.forEach((f) => fixturesById.set(String(f.id), f));
-      return send(res, 200, { date, matches: fixtures, dropped });
+      try {
+        const { fixtures, dropped } = cleanFixtures(await provider.getFixtures(date, tz));
+        fixtures.forEach((f) => fixturesById.set(String(f.id), f));
+        return send(res, 200, { date, matches: fixtures, dropped });
+      } catch (err) {
+        if (/limit|cuota|peticiones/i.test(err.message)) {
+          return send(res, 200, {
+            date,
+            matches: [],
+            warning: 'Has alcanzado el límite diario de 100 peticiones de API-Football. La cuota gratuita se reinicia a las 00:00 UTC.',
+          });
+        }
+        throw err;
+      }
     }
     if (url.pathname === '/api/match') {
       const id = parseId(url.searchParams.get('id'));

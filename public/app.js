@@ -63,7 +63,8 @@ function renderDates() {
 async function fetchMatches() {
   const r = await (await fetch(`/api/matches?date=${state.date}&tz=${encodeURIComponent(userTz)}`)).json();
   if (r.error) throw new Error(r.error);
-  state.matches = r.matches;
+  state.matches = r.matches || [];
+  state.warning = r.warning || null;
 }
 
 async function loadMatches(silent = false) {
@@ -71,6 +72,16 @@ async function loadMatches(silent = false) {
   try {
     await fetchMatches();
     renderFilters();
+    if (state.warning && state.matches.length === 0) {
+      $('#matches').innerHTML = `
+        <div class="quota-warning-card">
+          <div class="quota-icon">⏳</div>
+          <h3>Límite diario de API-Football alcanzado (100/día)</h3>
+          <p>${esc(state.warning)}</p>
+          <small>La cuota se renueva a las 00:00 UTC. Todos los partidos y pronósticos analizados previamente continúan disponibles en la base de datos local SQLite.</small>
+        </div>`;
+      return;
+    }
     renderMatches();
   } catch (e) {
     if (!silent) $('#matches').innerHTML = `<div class="empty">No se pudieron cargar los partidos: ${esc(e.message)}</div>`;
@@ -215,27 +226,48 @@ function matchCenter(m, events, stats) {
 }
 
 function headBlock(f) {
-  return `<button class="close" data-close aria-label="Cerrar">\u2715</button>
-    <div class="p-head"><small>${esc(f.league.name)}${f.league.round ? ' \u00b7 ' + esc(f.league.round) : ''} \u00b7 ${esc(f.venue || '')}</small>
+  return `
+    <button class="hub-close-circle" data-close aria-label="Cerrar">✕</button>
+    <div class="hub-header-bar">
+      <small class="hub-meta-title">${esc(f.league.name)}${f.league.round ? ' · ' + esc(f.league.round) : ''}${f.venue ? ' · ' + esc(f.venue) : ''}</small>
+    </div>
+    <div class="p-head">
       <div class="p-teams">${badge(f.home, 'lg')}<span class="vs">VS</span>${badge(f.away, 'lg')}</div>
       <h2>${esc(f.home.name)} vs ${esc(f.away.name)}</h2>
-      <small>${new Date(f.date).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' })}</small></div>`;
+      <small>${new Date(f.date).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' })}</small>
+    </div>`;
+}
+
+
+function preMatchCenter(f) {
+  return `<div class="mc mc-ns">
+    <div class="mc-top"><span class="st st-ns">Programado</span>${f.referee ? `<small>Árbitro: ${esc(f.referee)}</small>` : ''}</div>
+    <div class="mc-score"><span>${esc(f.home.name)}</span><b>VS</b><span>${esc(f.away.name)}</span></div>
+    <div class="mc-sub">${f.venue ? `Estadio: ${esc(f.venue)}` : ''}</div>
+    <p class="mc-note" style="margin-top:10px;">Partido programado. Las alineaciones oficiales se confirman típicamente 45-60 minutos antes del saque inicial.</p>
+    <div class="sec">Detalles del encuentro</div>
+    <div class="kpis" style="margin-top:8px;">
+      <div class="kpi"><div class="num" style="font-size:1.05rem;">${esc(f.league.country || 'Internacional')}</div><small>País</small></div>
+      <div class="kpi"><div class="num" style="font-size:1.05rem;">${esc(f.league.round || 'Jornada regular')}</div><small>Ronda</small></div>
+      <div class="kpi"><div class="num" style="font-size:1.05rem;">${new Date(f.date).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</div><small>Hora local</small></div>
+    </div>
+  </div>`;
 }
 
 function predictionBlocks(r, pre) {
   const { fixture: f, prediction: p, context: c } = r;
-  const inj = (t) => (t.injuries || []).length ? t.injuries.map((i) => `<li>\u{1FA79} ${esc(i.player)}</li>`).join('') : '<li>Sin bajas</li>';
+  const inj = (t) => (t.injuries || []).length ? t.injuries.map((i) => `<li>🩹 ${esc(i.player)}</li>`).join('') : '<li>Sin bajas</li>';
   const xi = (t) => (t.lineup || []).length ? t.lineup.map((x) => `<li>${esc(x.number)}. ${esc(x.name)}</li>`).join('') : '<li>No confirmado</li>';
   return `${verdictBlock(f, p, pre)}
       <div class="sec">Goles y marcador</div>
       <div class="kpis">
         <div class="kpi"><div class="num">${p.expectedScore}</div><small>${p.live ? 'Resultado final probable' : 'Marcador probable'}</small></div>
-        <div class="kpi"><div class="num">${pct(p.markets.over25)}%</div><small>M\u00e1s de 2.5</small></div>
+        <div class="kpi"><div class="num">${pct(p.markets.over25)}%</div><small>Más de 2.5</small></div>
         <div class="kpi"><div class="num">${pct(p.markets.btts)}%</div><small>Ambos marcan</small></div>
       </div>
       <div class="scores" style="margin-top:10px">${p.topScores.slice(0, 4).map((s) => `<span class="score-chip">${s.score}<small>${(s.p * 100).toFixed(1)}%</small></span>`).join('')}</div>
-      <div class="sec">Por qu\u00e9</div>
-      <div class="analysis"><div class="tag">${r.analysisSource === 'gemini' ? '\u2728 Gemini' : '\u{1F9E0} Modelo estad\u00edstico'}</div>${esc(r.analysis)}</div>
+      <div class="sec">Por qué</div>
+      <div class="analysis"><div class="tag">${r.analysisSource === 'gemini' ? '✨ Gemini' : '🧠 Modelo estadístico'}</div>${esc(r.analysis)}</div>
       <details class="more"><summary>Factores del modelo</summary>
         ${p.factors.map((x) => `<div class="factor ${x.impact > 0.05 ? 'pos' : x.impact < -0.05 ? 'neg' : ''}"><span class="dot"></span><div><b>${esc(x.label)}</b><p>${esc(x.detail)}</p></div></div>`).join('')}
       </details>
@@ -244,27 +276,28 @@ function predictionBlocks(r, pre) {
         <div class="sub-t">Bajas</div><div class="two"><ul>${inj(c.home)}</ul><ul>${inj(c.away)}</ul></div>
         <div class="sub-t">Titulares ${p.lineupsConfirmed ? '(confirmados)' : ''}</div><div class="two"><ul>${xi(c.home)}</ul><ul>${xi(c.away)}</ul></div>
       </details>
-      <details class="more"><summary>Calidad de los datos \u00b7 ${p.dataQuality?.score ?? '\u2014'}/100</summary>${qualityBlock(p.dataQuality)}</details>`;
+      <details class="more"><summary>Calidad de los datos · ${p.dataQuality?.score ?? '—'}/100</summary>${qualityBlock(p.dataQuality)}</details>`;
 }
 
 async function openMatch(id, silent = false) {
   const drawer = $('#drawer'), panel = $('#panel');
   state.openId = id;
+  document.body.classList.add('modal-open');
   drawer.classList.add('open');
   drawer.setAttribute('aria-hidden', 'false');
   const scroll = panel.scrollTop;
-  if (!silent) panel.innerHTML = '<div class="loading"><div class="spin"></div>Cargando datos del partido\u2026</div>';
+  if (!silent) panel.innerHTML = '<div class="hub-container"><div class="loading"><div class="spin"></div>Cargando datos del partido…</div></div>';
   try {
     const m = await (await fetch(`/api/match?id=${id}`)).json();
     if (m.error) throw new Error(m.error);
     const f = m.fixture, s = info(f);
-    let html = headBlock(f);
-    if (s.k !== 'ns') html += matchCenter(f, m.events, m.stats);
 
-    // Sección de pronóstico / IA optimizada
+    const leftCol = s.k !== 'ns' ? matchCenter(f, m.events, m.stats) : preMatchCenter(f);
+
+    let rightCol = '';
     if (m.cachedPrediction) {
       const pre = s.k !== 'ns';
-      html += `<div class="pred-section" id="pred-section">
+      rightCol = `<div class="pred-section" id="pred-section">
         <div class="db-cached-bar">
           <span class="db-pill">💾 Guardado en base de datos</span>
           <button class="btn-reanalyze" onclick="generatePrediction('${f.id}', true)">🔄 Recalcular con IA</button>
@@ -273,7 +306,7 @@ async function openMatch(id, silent = false) {
         ${predictionBlocks(m.cachedPrediction, pre)}
       </div>`;
     } else if (s.k === 'ns' || s.k === 'live' || s.k === 'ht') {
-      html += `<div class="pred-section" id="pred-section">
+      rightCol = `<div class="pred-section" id="pred-section">
         <div class="ai-cta-card">
           <div class="ai-cta-glow"></div>
           <div class="ai-cta-badge">✦ Inteligencia Artificial & Big Data</div>
@@ -290,16 +323,42 @@ async function openMatch(id, silent = false) {
         </div>
       </div>`;
     } else if (s.k === 'ft') {
-      html += '<p class="hint center" style="margin:24px 0 12px">Este partido ya finalizó: no hay pronóstico nuevo disponible.</p>';
+      rightCol = '<div class="pred-section"><p class="hint center" style="margin:24px 0 12px">Este partido ya finalizó: no hay pronóstico nuevo disponible.</p></div>';
     }
+
+    const html = `
+      <div class="hub-container">
+        ${headBlock(f)}
+        <div class="hub-tabs-mobile" id="hub-tabs">
+          <button class="hub-tab active" onclick="switchHubTab('live')">⚽ Partido y Estadísticas</button>
+          <button class="hub-tab" onclick="switchHubTab('ai')">✨ Pronóstico IA</button>
+        </div>
+        <div class="match-hub-grid" id="hub-grid" data-active="live">
+          <div class="hub-col hub-live-col">
+            ${leftCol}
+          </div>
+          <div class="hub-col hub-ai-col">
+            ${rightCol}
+          </div>
+        </div>
+      </div>
+    `;
 
     panel.innerHTML = html;
     if (silent) panel.scrollTop = scroll;
     requestAnimationFrame(() => panel.querySelectorAll('[data-w]').forEach((el) => (el.style.width = el.dataset.w + '%')));
   } catch (e) {
-    panel.innerHTML = `<button class="close" data-close>\u2715</button><div class="loading">Error: ${esc(e.message)}</div>`;
+    panel.innerHTML = `<div class="hub-container"><div class="hub-navbar"><button class="hub-back-btn" data-close>← Volver</button><button class="hub-close-circle" data-close>✕</button></div><div class="loading">Error: ${esc(e.message)}</div></div>`;
   }
 }
+
+window.switchHubTab = function(tab) {
+  const grid = $('#hub-grid');
+  if (grid) grid.dataset.active = tab;
+  document.querySelectorAll('.hub-tab').forEach(b => {
+    b.classList.toggle('active', (tab === 'live' && b.innerText.includes('Partido')) || (tab === 'ai' && b.innerText.includes('Pronóstico')));
+  });
+};
 
 window.generatePrediction = async function(id, force = false) {
   const sec = $('#pred-section');
@@ -356,16 +415,20 @@ loadStatus();
 renderDates();
 loadMatches();
 
-// Actualización automática: cada minuto si hay partidos en juego (solo recarga marcadores, NO llama a la IA)
+// Actualización automática inteligente: cuida la cuota de 100 peticiones/día
 let tick = 0;
 setInterval(async () => {
+  if (document.hidden) return; // Si la pestaña está minimizada u oculta, 0 peticiones
   tick++;
   const anyLive = state.matches.some((m) => phaseGroup(m) === 'live');
-  if (!anyLive && tick % 5) return;
+  // Sin partidos en vivo: cada 10 minutos. Con partidos en vivo: cada 2.5 minutos.
+  if (!anyLive && tick % 10 !== 0) return;
+  if (anyLive && tick % 3 !== 0) return;
   await loadMatches(true);
   const open = state.matches.find((m) => String(m.id) === String(state.openId));
   if (open && phaseGroup(open) === 'live') {
     updateLiveMatchCenter(state.openId);
   }
-}, 60 * 1000);
+}, 50 * 1000);
+
 

@@ -25,6 +25,13 @@ db.exec(`
     created_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_predictions_date ON predictions(date);
+
+  CREATE TABLE IF NOT EXISTS api_cache (
+    path TEXT PRIMARY KEY,
+    payload TEXT,
+    updated_at INTEGER
+  );
+
 `);
 
 export function getCachedPrediction(fixtureId, currentStatus) {
@@ -76,3 +83,31 @@ export function savePrediction(fixtureId, date, status, payload) {
     console.error('Error guardando en SQLite:', err.message);
   }
 }
+
+export function getApiCache(path, maxAgeMs) {
+  try {
+    const stmt = db.prepare('SELECT payload, updated_at FROM api_cache WHERE path = ?');
+    const row = stmt.get(path);
+    if (!row) return null;
+    if (maxAgeMs && (Date.now() - row.updated_at > maxAgeMs)) return null;
+    return JSON.parse(row.payload);
+  } catch (err) {
+    return null;
+  }
+}
+
+export function saveApiCache(path, data) {
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO api_cache (path, payload, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(path) DO UPDATE SET
+        payload = excluded.payload,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(path, JSON.stringify(data), Date.now());
+  } catch (err) {
+    console.error('Error guardando api_cache en SQLite:', err.message);
+  }
+}
+

@@ -1,12 +1,23 @@
 // Proveedor API-Football (api-sports.io) - plan gratuito: 100 peticiones/día.
-// Cache en memoria para ahorrar cuota.
+// Protección de cuota agresiva con caché persistente en disco (SQLite).
+
+import { getApiCache, saveApiCache } from '../db.js';
 
 const BASE = 'https://v3.football.api-sports.io';
 const cache = new Map();
 
 async function api(path, ttlMs) {
+  // 1. Memoria rápida
   const hit = cache.get(path);
   if (hit && Date.now() - hit.t < ttlMs) return hit.data;
+
+  // 2. Disco persistente SQLite (sobrevive reinicios de Node)
+  const diskHit = getApiCache(path, ttlMs);
+  if (diskHit) {
+    cache.set(path, { t: Date.now(), data: diskHit });
+    return diskHit;
+  }
+
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -18,23 +29,34 @@ async function api(path, ttlMs) {
       if (!res.ok) throw new Error(`API-Football HTTP ${res.status}`);
       const json = await res.json();
       const errs = json.errors && (Array.isArray(json.errors) ? json.errors : Object.values(json.errors));
-      if (errs && errs.length) throw Object.assign(new Error('API-Football: ' + errs.join(' | ')), { fatal: true });
-      if (!json || !Array.isArray(json.response) && typeof json.response !== 'object') throw new Error('Respuesta con formato inesperado');
+      if (errs && errs.length) throw Object.assign(new Error('API-Football: ' + errs.join(' | ')), { fatal: true, isLimit: /limit|request/i.test(errs.join(' ')) });
+      if (!json || (!Array.isArray(json.response) && typeof json.response !== 'object')) throw new Error('Respuesta con formato inesperado');
+      
+      // Guardar en memoria y en disco local
       cache.set(path, { t: Date.now(), data: json.response });
+      saveApiCache(path, json.response);
       return json.response;
     } catch (e) {
       lastErr = e;
-      if (e.fatal || /Límite/.test(e.message)) break;
+      if (e.fatal || /Límite|limit/i.test(e.message)) break;
       await new Promise((r) => setTimeout(r, 400));
     }
   }
-  // Si hay datos viejos en caché, es mejor usarlos que fallar
+
+  // 3. Si falló por límite de cuota o error de red, usar respaldo histórico de SQLite
+  const fallback = getApiCache(path, null);
+  if (fallback) {
+    console.warn(`[Modo Protección] Cuota alcanzada. Usando respaldo en SQLite para: ${path}`);
+    cache.set(path, { t: Date.now(), data: fallback });
+    return fallback;
+  }
   if (hit) return hit.data;
   throw lastErr;
 }
 
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
+
 
 export const name = 'API-Football';
 
