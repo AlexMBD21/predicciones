@@ -5,7 +5,41 @@ const pad = (n) => String(n).padStart(2, '0');
 const localIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
 
-let state = { date: localIso(new Date()), league: 'all', phase: 'all', matches: [], openId: null };
+let state = { date: localIso(new Date()), league: 'all', phase: 'all', matches: [], openId: null, search: '' };
+
+/* ---------- Funciones auxiliares de búsqueda ---------- */
+const norm = (s) =>
+  String(s ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+function matchPassesSearch(m, query) {
+  if (!query) return true;
+  const q = norm(query);
+  return norm(m.home?.name).includes(q) || norm(m.away?.name).includes(q) || norm(m.league?.name).includes(q);
+}
+
+function highlightMatch(text, query) {
+  if (!query || !text) return esc(text);
+  const raw = String(text);
+  const qClean = query.trim();
+  if (!qClean) return esc(raw);
+  const safe = qClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    const rx = new RegExp(`(${safe})`, 'gi');
+    if (rx.test(raw)) {
+      return esc(raw).replace(rx, '<mark class="search-hl">$1</mark>');
+    }
+  } catch {}
+  const nRaw = norm(raw);
+  const nQ = norm(qClean);
+  if (nRaw.includes(nQ)) {
+    return `<mark class="search-hl">${esc(raw)}</mark>`;
+  }
+  return esc(raw);
+}
 
 /* ---------- Estados del partido ---------- */
 const PHASES = {
@@ -18,19 +52,86 @@ const PHASES = {
 };
 
 function info(m) {
-  const [label, k] = PHASES[m.status] || ['Programado', 'ns'];
-  const clock = ['1H', '2H', 'ET'].includes(m.status) && m.minute ? `${m.minute}${m.extra ? '+' + m.extra : ''}'` : '';
+  let [label, k] = PHASES[m.status] || ['Programado', 'ns'];
+  let isLive = ['1H', '2H', 'ET', 'LIVE', 'P'].includes(m.status);
+
+  // Minuto del partido en vivo proporcionado por la API
+  let minute = m.minute;
+  let extra = m.extra ?? null;
+
+  let noBroadcast = !!m.noBroadcast;
+
+  // Detección automática de partido en curso: si la API lo tiene como NS pero su hora ya llegó
+  if ((m.status === 'NS' || m.status === 'TBD') && m.date) {
+    const elapsed = Math.floor((Date.now() - new Date(m.date).getTime()) / 60000);
+    if (elapsed >= 0) {
+      noBroadcast = true;
+      if (elapsed <= 45) {
+        k = 'live'; label = 'Primer tiempo'; minute = Math.max(1, elapsed); isLive = true;
+      } else if (elapsed <= 60) {
+        k = 'ht'; label = 'Medio tiempo'; minute = 45;
+      } else if (elapsed <= 115) {
+        k = 'live'; label = 'Segundo tiempo'; minute = Math.min(45 + (elapsed - 60), 90); isLive = true;
+      } else if (elapsed <= 140) {
+        k = 'live'; label = 'Tiempo cumplido'; minute = 90; extra = Math.min(elapsed - 115, 10); isLive = true;
+      } else if (elapsed > 140) {
+        k = 'ft'; label = 'Finalizado'; minute = 90;
+      }
+    }
+  }
+
+  // Si ya era live por la API pero no traía minute:
+  if (minute == null && isLive && m.date) {
+    const elapsedMs = Date.now() - new Date(m.date).getTime();
+    if (elapsedMs > 0) {
+      const estimated = Math.floor(elapsedMs / 60000);
+      if (m.status === '1H') minute = Math.min(estimated, 45);
+      else if (m.status === '2H') minute = Math.min(45 + estimated, 90);
+      else minute = estimated;
+    }
+  }
+
+  let clock = '';
+  if (k === 'ht' || m.status === 'HT') {
+    clock = 'Descanso MT';
+  } else if (isLive) {
+    if (minute != null) {
+      clock = `${minute}${extra ? '+' + extra : ''}'`;
+    } else {
+      clock = 'En juego';
+    }
+  }
+
   const time = new Date(m.date).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
   return {
-    k, label, clock, time,
+    k, label, clock, minute, time, noBroadcast,
     started: ['live', 'ht', 'ft'].includes(k),
-    chip: k === 'ns' ? time : k === 'live' ? (clock ? `${clock} · En vivo` : label) : label,
+    chip: k === 'ns' ? time : k === 'live' ? (clock ? `${clock} · En vivo` : label) : (k === 'ht' ? 'Descanso MT' : label),
   };
 }
 
 const chipHtml = (m) => {
   const i = info(m);
-  return `<span class="st st-${i.k}">${i.k === 'live' ? '<i class="pulse-dot"></i>' : ''}${esc(i.chip)}</span>`;
+  if (i.k === 'live') {
+    const hasMinute = i.clock && i.clock !== 'En vivo' && i.clock !== 'En juego';
+    const ledHtml = i.noBroadcast
+      ? '<i class="led-off" title="En curso (led apagado: sin transmisión de datos en vivo)"></i>'
+      : '<i class="pulse-dot"></i>';
+
+    return `<span class="st st-live" title="${hasMinute ? `Minuto ${esc(i.clock)}` : 'Partido en vivo'}">
+      ${ledHtml}
+      ${hasMinute ? `<b class="st-clock">${esc(i.clock)}</b><span class="st-sep"></span>` : ''}
+      <span class="st-live-text">EN VIVO</span>
+    </span>`;
+  }
+  if (i.k === 'ht') {
+    return `<span class="st st-ht" title="Descanso de medio tiempo">
+      <b class="st-clock">MT</b>
+      <span class="st-sep"></span>
+      <span class="st-ht-text">Descanso</span>
+    </span>`;
+  }
+  return `<span class="st st-${i.k}">${esc(i.chip)}</span>`;
 };
 
 function badge(t, size = '') {
@@ -91,13 +192,19 @@ async function loadMatches(silent = false) {
 const phaseGroup = (m) => { const k = info(m).k; return k === 'live' || k === 'ht' ? 'live' : k === 'ft' ? 'ft' : k === 'ns' ? 'ns' : 'bad'; };
 
 function renderFilters() {
-  const count = (g) => state.matches.filter((m) => phaseGroup(m) === g).length;
-  const phases = [['all', 'Todos', state.matches.length], ['live', 'En vivo', count('live')], ['ns', 'Pr\u00f3ximos', count('ns')], ['ft', 'Finalizados', count('ft')]];
+  const matchesMatchingSearch = state.matches.filter((m) => matchPassesSearch(m, state.search));
+  const count = (g) => matchesMatchingSearch.filter((m) => phaseGroup(m) === g).length;
+  const phases = [
+    ['all', 'Todos', matchesMatchingSearch.length],
+    ['live', 'En vivo', count('live')],
+    ['ns', 'Próximos', count('ns')],
+    ['ft', 'Finalizados', count('ft')],
+  ];
   const ph = $('#statuses');
   ph.innerHTML = phases.map(([k, l, n]) => `<button class="chip ${state.phase === k ? 'active' : ''} ${k === 'live' && n ? 'hot' : ''}" data-p="${k}">${l} <b>${n}</b></button>`).join('');
   ph.onclick = (e) => { const p = e.target.closest('[data-p]')?.dataset.p; if (p) { state.phase = p; renderFilters(); renderMatches(); } };
 
-  const names = [...new Set(state.matches.map((m) => m.league.name))].slice(0, 30);
+  const names = [...new Set(matchesMatchingSearch.map((m) => m.league.name))].slice(0, 30);
   const wrap = $('#leagues');
   wrap.innerHTML = ['all', ...names].map((n) => `<button class="chip ${state.league === n ? 'active' : ''}" data-l="${esc(n)}">${n === 'all' ? 'Todas las ligas' : esc(n)}</button>`).join('');
   wrap.onclick = (e) => { const l = e.target.dataset.l; if (l) { state.league = l; renderFilters(); renderMatches(); } };
@@ -106,29 +213,215 @@ function renderFilters() {
 function renderMatches() {
   const order = { live: 0, ns: 1, ft: 2, bad: 3 };
   const list = state.matches
-    .filter((m) => (state.league === 'all' || m.league.name === state.league) && (state.phase === 'all' || phaseGroup(m) === state.phase))
+    .filter((m) => (state.league === 'all' || m.league.name === state.league) &&
+                   (state.phase === 'all' || phaseGroup(m) === state.phase) &&
+                   matchPassesSearch(m, state.search))
     .sort((a, b) => (state.phase === 'all' ? order[phaseGroup(a)] - order[phaseGroup(b)] : 0) || a.date.localeCompare(b.date));
-  if (!list.length) { $('#matches').innerHTML = '<div class="empty">No hay partidos con este filtro.</div>'; return; }
-  $('#matches').innerHTML = list.map((m, i) => {
+
+  const searchBarHtml = state.search ? `
+    <div class="search-active-bar" style="grid-column: 1 / -1;">
+      <span>Resultados para: <strong>"${esc(state.search)}"</strong> (${list.length} ${list.length === 1 ? 'partido encontrado' : 'partidos encontrados'})</span>
+      <button class="btn-clear-search-pill" id="btnClearSearchPill">Limpiar búsqueda ✕</button>
+    </div>` : '';
+
+  if (!list.length) {
+    if (state.search) {
+      $('#matches').innerHTML = `
+        <div class="empty search-empty" style="grid-column: 1 / -1; text-align: center; padding: 48px 16px;">
+          <div style="font-size:2.8rem; margin-bottom: 12px;">🔍</div>
+          <h3 style="font-family:Outfit,sans-serif; font-size:1.35rem; margin-bottom: 8px;">No se encontraron partidos de "${esc(state.search)}"</h3>
+          <p style="color:var(--muted); margin-bottom: 20px; font-size:.92rem; max-width:440px; margin-left:auto; margin-right:auto;">
+            No hay partidos en la fecha seleccionada. Puedes seleccionar otro día en el calendario de arriba para ver cuándo juega este equipo.
+          </p>
+          <button class="btn-reset-search" id="btnResetSearch">Ver todos los partidos de hoy</button>
+        </div>`;
+      $('#btnResetSearch')?.addEventListener('click', clearSearch);
+      return;
+    }
+    $('#matches').innerHTML = '<div class="empty">No hay partidos con este filtro.</div>';
+    return;
+  }
+
+  const cardsHtml = list.map((m, i) => {
     const s = info(m);
     const g = m.goals || {};
     const hw = s.k === 'ft' && g.home > g.away, aw = s.k === 'ft' && g.away > g.home;
     const mid = s.started
-      ? `<div class="vs score">${g.home ?? 0} - ${g.away ?? 0}${m.halftime && s.k !== 'ht' ? `<small>MT ${m.halftime.home}-${m.halftime.away}</small>` : ''}</div>`
+      ? `<div class="vs score">
+          <div class="score-numbers">${g.home != null && g.away != null ? `${g.home} - ${g.away}` : 'VS'}</div>
+          ${m.halftime && s.k !== 'ht' ? `<small>MT ${m.halftime.home}-${m.halftime.away}</small>` : (g.home == null ? `<small style="font-size:.66rem;color:var(--muted)">En juego</small>` : '')}
+        </div>`
       : '<div class="vs">VS</div>';
-    const cta = s.k === 'live' || s.k === 'ht' ? 'Ver en vivo y pron\u00f3stico \u2192' : s.k === 'ft' ? 'Ver resumen del partido \u2192' : s.k === 'bad' ? 'Ver detalles \u2192' : 'Ver pron\u00f3stico IA \u2192';
-    return `<article class="card ${s.k}" style="animation-delay:${Math.min(i, 12) * 40}ms" data-id="${m.id}" tabindex="0">
-      <div class="card-top"><span class="lgname">${m.league.logo ? `<img src="${esc(m.league.logo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}${esc(m.league.name)}</span>${chipHtml(m)}</div>
+    const cta = s.k === 'live' || s.k === 'ht' ? 'Ver en vivo y pronóstico' : s.k === 'ft' ? 'Ver resumen del partido' : s.k === 'bad' ? 'Ver detalles' : 'Ver pronóstico IA';
+    return `<article class="card ${s.k}" style="animation-delay:${Math.min(i, 12) * 40}ms" data-id="${m.id}">
+      <div class="card-top"><span class="lgname">${m.league.logo ? `<img src="${esc(m.league.logo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}${highlightMatch(m.league.name, state.search)}</span>${chipHtml(m)}</div>
       <div class="teams">
-        <div class="team ${hw ? 'win' : ''}">${badge(m.home)}<span>${esc(m.home.name)}</span></div>
+        <div class="team ${hw ? 'win' : ''}">${badge(m.home)}<span>${highlightMatch(m.home.name, state.search)}</span></div>
         ${mid}
-        <div class="team ${aw ? 'win' : ''}">${badge(m.away)}<span>${esc(m.away.name)}</span></div>
+        <div class="team ${aw ? 'win' : ''}">${badge(m.away)}<span>${highlightMatch(m.away.name, state.search)}</span></div>
       </div>
-      <div class="card-cta">${cta}</div></article>`;
+      <div class="card-action-wrap">
+        <button type="button" class="btn-open-match" data-id="${m.id}" aria-label="Abrir detalles de ${esc(m.home.name)} vs ${esc(m.away.name)}">
+          <span>${cta}</span>
+          <svg class="btn-arrow" viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div></article>`;
   }).join('');
-  document.querySelectorAll('.card').forEach((c) => {
-    c.onclick = () => openMatch(c.dataset.id);
-    c.onkeydown = (e) => e.key === 'Enter' && openMatch(c.dataset.id);
+
+  $('#matches').innerHTML = searchBarHtml + cardsHtml;
+
+  $('#btnClearSearchPill')?.addEventListener('click', clearSearch);
+
+  // Abrir modal solo mediante el botón explícito, evitando aperturas accidentales al tocar la tarjeta
+  document.querySelectorAll('.btn-open-match').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      openMatch(btn.dataset.id);
+    };
+  });
+}
+
+/* ---------- Desplegable y Control de Búsqueda ---------- */
+function renderSearchDropdown() {
+  const dropdown = $('#searchDropdown');
+  if (!dropdown) return;
+  const q = state.search;
+  if (!q) {
+    dropdown.style.display = 'none';
+    dropdown.innerHTML = '';
+    return;
+  }
+
+  const matches = state.matches.filter((m) => matchPassesSearch(m, q));
+
+  if (!matches.length) {
+    dropdown.innerHTML = `
+      <div class="search-no-results">
+        <div class="search-empty-icon">⚽</div>
+        <div class="search-empty-title">Sin partidos de <strong>"${esc(q)}"</strong> hoy</div>
+        <div class="search-empty-sub">Comprueba las fechas anteriores o siguientes en el calendario de arriba para ver cuándo juega.</div>
+      </div>
+    `;
+    dropdown.style.display = 'block';
+    return;
+  }
+
+  const items = matches.slice(0, 6).map((m) => {
+    const s = info(m);
+    const g = m.goals || {};
+    const isHomeMatched = norm(m.home.name).includes(norm(q));
+    const isAwayMatched = norm(m.away.name).includes(norm(q));
+
+    const scoreOrTime = s.started
+      ? `<span class="search-score">${g.home ?? 0} - ${g.away ?? 0}</span>`
+      : `<span class="search-time">${s.time}</span>`;
+
+    return `
+      <div class="search-item" data-id="${m.id}" tabindex="0" role="option">
+        <div class="search-item-header">
+          <span class="search-item-league">
+            ${m.league.logo ? `<img src="${esc(m.league.logo)}" alt="" class="search-item-logo" onerror="this.remove()">` : ''}
+            <span>${esc(m.league.name)}</span>
+          </span>
+          ${chipHtml(m)}
+        </div>
+        <div class="search-item-teams">
+          <div class="search-item-team ${isHomeMatched ? 'matched' : ''}">
+            ${badge(m.home, 'badge-sm')}
+            <span class="search-team-name">${highlightMatch(m.home.name, q)}</span>
+          </div>
+          <div class="search-item-vs">${scoreOrTime}</div>
+          <div class="search-item-team ${isAwayMatched ? 'matched' : ''}">
+            ${badge(m.away, 'badge-sm')}
+            <span class="search-team-name">${highlightMatch(m.away.name, q)}</span>
+          </div>
+        </div>
+        <div class="search-item-cta">${s.started ? 'Ver partido en vivo y pronóstico →' : 'Ver pronóstico IA →'}</div>
+      </div>
+    `;
+  }).join('');
+
+  dropdown.innerHTML = `
+    <div class="search-dropdown-header">
+      <span>Partidos encontrados (${matches.length})</span>
+      <span style="font-size:.7rem; color:var(--muted); text-transform:none;">Clic para abrir</span>
+    </div>
+    ${items}
+  `;
+  dropdown.style.display = 'block';
+
+  dropdown.querySelectorAll('.search-item').forEach((item) => {
+    const id = item.dataset.id;
+    item.addEventListener('click', () => {
+      openMatch(id);
+      dropdown.style.display = 'none';
+    });
+    item.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        openMatch(id);
+        dropdown.style.display = 'none';
+      }
+    });
+  });
+}
+
+function clearSearch() {
+  state.search = '';
+  const input = $('#teamSearch');
+  if (input) input.value = '';
+  const clearBtn = $('#clearSearch');
+  if (clearBtn) clearBtn.style.display = 'none';
+  const dropdown = $('#searchDropdown');
+  if (dropdown) dropdown.style.display = 'none';
+  renderFilters();
+  renderMatches();
+}
+
+function initSearch() {
+  const input = $('#teamSearch');
+  const clearBtn = $('#clearSearch');
+  const dropdown = $('#searchDropdown');
+
+  if (!input) return;
+
+  input.addEventListener('input', (e) => {
+    const val = e.target.value.trim();
+    state.search = val;
+    clearBtn.style.display = val ? 'grid' : 'none';
+    renderFilters();
+    renderMatches();
+    renderSearchDropdown();
+  });
+
+  input.addEventListener('focus', () => {
+    if (state.search) renderSearchDropdown();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    clearSearch();
+    input.focus();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#searchWrap')) {
+      dropdown.style.display = 'none';
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== input && !document.activeElement.matches('input, textarea')) {
+      e.preventDefault();
+      input.focus();
+      input.select();
+    } else if (e.key === 'Escape') {
+      if (dropdown.style.display !== 'none') {
+        dropdown.style.display = 'none';
+      } else if (document.activeElement === input && input.value) {
+        clearSearch();
+      }
+    }
   });
 }
 
@@ -209,9 +502,11 @@ function matchCenter(m, events, stats) {
     ht: 'Descanso. El segundo tiempo comienza en breve.',
     ft: 'El partido ha terminado.',
     bad: m.statusLong ? `Estado: ${m.statusLong}.` : 'El partido no se juega en la fecha prevista.',
-    live: 'Partido en juego. Se actualiza cada minuto.',
+    live: s.noBroadcast
+      ? 'Partido en juego según horario oficial (Transmisión en directo no disponible en el proveedor API-Football. El análisis táctico y pronóstico con IA está disponible a la derecha).'
+      : 'Partido en juego. Se actualiza cada minuto.',
   };
-  const score = s.started ? `${g.home ?? 0} - ${g.away ?? 0}` : '\u2014';
+  const score = (g.home !== null && g.away !== null && g.home !== undefined) ? `${g.home} - ${g.away}` : (s.started ? 'VS' : '\u2014');
   const showEvents = events.filter((e) => e.type !== 'subst');
   const subs = events.filter((e) => e.type === 'subst');
   return `<div class="mc mc-${s.k}">
@@ -407,28 +702,37 @@ async function updateLiveMatchCenter(id) {
   } catch {}
 }
 
-const closeDrawer = () => { state.openId = null; $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); };
+const closeDrawer = () => {
+  state.openId = null;
+  document.body.classList.remove('modal-open');
+  $('#drawer').classList.remove('open');
+  $('#drawer').setAttribute('aria-hidden', 'true');
+};
+window.closeDrawer = closeDrawer;
 $('#drawer').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeDrawer(); });
 document.addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer());
 
+window.clearSearchFilter = clearSearch;
 loadStatus();
 renderDates();
 loadMatches();
+initSearch();
 
-// Actualización automática inteligente: cuida la cuota de 100 peticiones/día
-let tick = 0;
+// Actualización automática inteligente: se ejecuta cada 1 minuto en vivo (protegiendo el límite de 100 peticiones/día)
+let loopMinute = 0;
 setInterval(async () => {
-  if (document.hidden) return; // Si la pestaña está minimizada u oculta, 0 peticiones
-  tick++;
+  if (document.hidden) return; // Si la pestaña está en segundo plano o minimizada, 0 peticiones
+  loopMinute++;
   const anyLive = state.matches.some((m) => phaseGroup(m) === 'live');
-  // Sin partidos en vivo: cada 10 minutos. Con partidos en vivo: cada 2.5 minutos.
-  if (!anyLive && tick % 10 !== 0) return;
-  if (anyLive && tick % 3 !== 0) return;
+  // Sin partidos en vivo: consultar cada 10 minutos para ahorrar cuota
+  if (!anyLive && loopMinute % 10 !== 0) return;
+
+  // Con partidos en vivo: consultar cada 1 minuto (sincronizado con la caché de 60s del servidor)
   await loadMatches(true);
   const open = state.matches.find((m) => String(m.id) === String(state.openId));
   if (open && phaseGroup(open) === 'live') {
     updateLiveMatchCenter(state.openId);
   }
-}, 50 * 1000);
+}, 60 * 1000);
 
 

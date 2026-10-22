@@ -54,7 +54,36 @@ const server = http.createServer(async (req, res) => {
       const tz = url.searchParams.get('tz') || 'America/Bogota';
       try {
         const { fixtures, dropped } = cleanFixtures(await provider.getFixtures(date, tz));
-        fixtures.forEach((f) => fixturesById.set(String(f.id), f));
+        const now = Date.now();
+        fixtures.forEach((f) => {
+          // Si el partido está como NS o TBD pero su fecha/hora de inicio ya llegó,
+          // promoverlo de forma automática a estado en progreso para ligas con retraso de API
+          if ((f.status === 'NS' || f.status === 'TBD') && f.date) {
+            const matchTime = new Date(f.date).getTime();
+            const elapsed = Math.floor((now - matchTime) / 60000);
+            if (elapsed >= 0) {
+              if (elapsed <= 45) {
+                f.status = '1H';
+                f.statusLong = 'Primer tiempo';
+                f.minute = Math.max(1, elapsed);
+              } else if (elapsed <= 60) {
+                f.status = 'HT';
+                f.statusLong = 'Medio tiempo';
+                f.minute = 45;
+              } else if (elapsed <= 115) {
+                f.status = '2H';
+                f.statusLong = 'Segundo tiempo';
+                f.minute = Math.min(45 + (elapsed - 60), 90);
+              } else if (elapsed <= 140) {
+                f.status = '2H';
+                f.statusLong = 'Tiempo cumplido';
+                f.minute = 90;
+                f.extra = Math.min(elapsed - 115, 10);
+              }
+            }
+          }
+          fixturesById.set(String(f.id), f);
+        });
         return send(res, 200, { date, matches: fixtures, dropped });
       } catch (err) {
         if (/limit|cuota|peticiones/i.test(err.message)) {
@@ -144,4 +173,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`⚽ Pronósticos en http://localhost:${PORT}  [${provider.name}]`));
+server.listen(PORT, () => console.log(` Pronósticos en http://localhost:${PORT}  [${provider.name}]`));

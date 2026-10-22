@@ -14,6 +14,18 @@
   <div class="bg-orb orb-1"></div><div class="bg-orb orb-2"></div>
   <header class="topbar">
     <div class="brand"><span class="logo">⚽</span><span>Prono<b>XI</b></span></div>
+    <div class="search-wrap" id="searchWrap">
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="teamSearch" class="search-input" placeholder="Buscar equipo o selección..." autocomplete="off" spellcheck="false" />
+        <button type="button" id="clearSearch" class="search-clear" aria-label="Limpiar búsqueda" title="Limpiar" style="display:none;">✕</button>
+        <kbd class="search-kbd" title="Presiona '/' para buscar">/</kbd>
+      </div>
+      <div id="searchDropdown" class="search-dropdown" style="display:none;" role="listbox"></div>
+    </div>
     <div id="status" class="status-pill">Conectando…</div>
   </header>
 
