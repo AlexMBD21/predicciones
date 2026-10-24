@@ -1519,36 +1519,33 @@ body.modal-open{overflow:hidden !important}
   z-index:1;
   display:inline-grid;
   place-items:center;
-  width:74px;
-  height:74px;
-  margin:0 auto 16px;
+  margin:0 auto 14px;
 }
 
 .quota-icon-halo{
-  position:absolute;
-  inset:0;
-  border-radius:50%;
-  background:linear-gradient(135deg,rgba(245,158,11,.32),rgba(217,119,6,.12));
-  border:1px solid rgba(245,158,11,.35);
-  box-shadow:0 0 20px rgba(245,158,11,.2);
-  animation:haloSpin 9s linear infinite;
-}
-
-@keyframes haloSpin{
-  0%{transform:rotate(0deg)}
-  100%{transform:rotate(360deg)}
+  display:none !important;
 }
 
 .quota-icon{
-  font-size:2.35rem;
-  animation:floatHourglass 3s ease-in-out infinite;
+  font-size:3.2rem;
+  line-height:1;
   display:inline-block;
   user-select:none;
+  transform-origin:center center;
+  animation:hourglassTurn 4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  filter:drop-shadow(0 4px 18px rgba(245,158,11,.35));
 }
 
-@keyframes floatHourglass{
-  0%,100%{transform:translateY(0) rotate(0deg)}
-  50%{transform:translateY(-8px) rotate(14deg)}
+@keyframes hourglassTurn{
+  0%, 35% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(180deg);
+  }
+  85%, 100% {
+    transform: rotate(360deg);
+  }
 }
 
 .quota-title{

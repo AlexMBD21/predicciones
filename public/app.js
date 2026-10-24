@@ -363,7 +363,6 @@ async function loadMatches(silent = false) {
             Modo Protección de Cuota
           </div>
           <div class="quota-icon-wrap">
-            <div class="quota-icon-halo"></div>
             <div class="quota-icon">⏳</div>
           </div>
           <h3 class="quota-title">Límite Diario de Consultas Alcanzado</h3>
