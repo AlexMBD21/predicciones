@@ -62,18 +62,20 @@ export async function handler(req, res) {
   }
 
   // Resolver pathname compatible con Vercel rewrites y Serverless Functions
-  let pathname = url.pathname;
-  if (req.headers['x-matched-path']) {
+  let pathname = req.targetRoute || url.pathname;
+  if (!req.targetRoute && req.headers['x-matched-path']) {
     try {
       pathname = new URL(req.headers['x-matched-path'], 'http://localhost').pathname;
     } catch {}
-  } else if (pathname.startsWith('/api/index')) {
+  } else if (!req.targetRoute && pathname.startsWith('/api/index')) {
     const sub = url.searchParams.get('path');
     if (sub) pathname = `/api/${sub}`;
   }
   if (pathname.endsWith('.js')) {
     pathname = pathname.slice(0, -3);
   }
+
+  const getParam = (name) => (req.query && req.query[name]) || url.searchParams.get(name) || null;
 
   try {
     if (req.method !== 'GET') return send(res, 405, { error: 'Método no permitido' });
@@ -85,8 +87,8 @@ export async function handler(req, res) {
       return send(res, 200, { provider: provider.name, gemini: !!process.env.GEMINI_API_KEY, supabase: isSupabaseConnected() });
     }
     if (pathname === '/api/matches') {
-      const date = parseDate(url.searchParams.get('date'));
-      const tz = url.searchParams.get('tz') || 'America/Bogota';
+      const date = parseDate(getParam('date'));
+      const tz = getParam('tz') || 'America/Bogota';
       try {
         const { fixtures, dropped } = cleanFixtures(await provider.getFixtures(date, tz));
         const now = Date.now();
@@ -134,7 +136,7 @@ export async function handler(req, res) {
       }
     }
     if (pathname === '/api/match') {
-      const id = parseId(url.searchParams.get('id'));
+      const id = parseId(getParam('id'));
       let fx = fixturesById.get(id);
       if (!fx) {
         try {
@@ -151,7 +153,7 @@ export async function handler(req, res) {
       return send(res, 200, { fixture: fx, events: detail.events, stats: detail.stats, cachedPrediction });
     }
     if (pathname === '/api/predict') {
-      const id = parseId(url.searchParams.get('id'));
+      const id = parseId(getParam('id'));
       let fx = fixturesById.get(id);
       if (!fx) {
         try {
@@ -161,7 +163,7 @@ export async function handler(req, res) {
       }
       if (!fx) return send(res, 404, { error: 'Partido no encontrado. Recarga la lista.' });
 
-      const force = url.searchParams.get('force') === '1';
+      const force = getParam('force') === '1';
       const cached = await getCachedPrediction(id, fx.status);
 
       // Si ya está en caché y no se pide forzar recálculo, responder inmediatamente sin gastar API
@@ -222,8 +224,9 @@ export async function handler(req, res) {
 
 export const server = http.createServer(handler);
 
-// Iniciar servidor local solo si no estamos dentro del entorno serverless de Vercel
-if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+// Iniciar servidor local solo si se ejecuta directamente como script principal (node server/index.js)
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
   server.listen(PORT, () => {
     const supa = isSupabaseConnected() ? ' + Supabase ☁️' : '';
     console.log(`⚽ Pronósticos en http://localhost:${PORT} [${provider.name}${supa}]`);
