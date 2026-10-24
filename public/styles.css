@@ -1440,46 +1440,31 @@ body.modal-open{overflow:hidden !important}
 }
 .ai-err-box p{color:#ff8a98;font-size:.88rem;margin:0 0 12px}
 
-/* ---------- Tarjeta Premium Animada de Límite de Cuota ---------- */
+/* ---------- Tarjeta Limpia de Límite de Cuota ---------- */
 .quota-warning-card{
   position:relative;
   grid-column:1/-1;
   max-width:820px;
   margin:24px auto 36px;
   padding:38px 30px;
-  background:linear-gradient(180deg,rgba(21,27,43,.96) 0%,rgba(10,14,24,.98) 100%);
-  border:1px solid rgba(245,158,11,.32);
+  background:var(--card);
+  border:1px solid var(--line);
   border-radius:24px;
   text-align:center;
-  box-shadow:0 24px 60px -15px rgba(0,0,0,.75),0 0 35px -8px rgba(245,158,11,.2);
-  backdrop-filter:blur(24px);
-  -webkit-backdrop-filter:blur(24px);
+  box-shadow:none !important;
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
   overflow:hidden;
-  animation:cardFadeIn .6s cubic-bezier(.16,1,.3,1) both;
+  animation:cardFadeIn .4s ease both;
 }
 
 @keyframes cardFadeIn{
-  from{opacity:0;transform:translateY(18px) scale(.98)}
-  to{opacity:1;transform:translateY(0) scale(1)}
+  from{opacity:0;transform:translateY(12px)}
+  to{opacity:1;transform:translateY(0)}
 }
 
 .quota-card-ambient{
-  position:absolute;
-  top:-110px;
-  left:50%;
-  transform:translateX(-50%);
-  width:360px;
-  height:240px;
-  background:radial-gradient(circle,rgba(245,158,11,.25) 0%,rgba(245,158,11,0) 70%);
-  filter:blur(45px);
-  pointer-events:none;
-  z-index:0;
-  animation:ambientPulse 4s ease-in-out infinite alternate;
-}
-
-@keyframes ambientPulse{
-  0%{opacity:.45;transform:translateX(-50%) scale(.88)}
-  100%{opacity:1;transform:translateX(-50%) scale(1.18)}
+  display:none !important;
 }
 
 .quota-badge{
@@ -1490,9 +1475,9 @@ body.modal-open{overflow:hidden !important}
   gap:8px;
   padding:6px 16px;
   border-radius:99px;
-  background:rgba(245,158,11,.12);
-  border:1px solid rgba(245,158,11,.38);
-  color:#fbbf24;
+  background:rgba(255,255,255,.05);
+  border:1px solid var(--line);
+  color:var(--text);
   font-size:.78rem;
   font-weight:600;
   text-transform:uppercase;
@@ -1504,14 +1489,7 @@ body.modal-open{overflow:hidden !important}
   width:7px;
   height:7px;
   border-radius:50%;
-  background:#f59e0b;
-  box-shadow:0 0 10px #f59e0b;
-  animation:badgeDotPulse 1.8s infinite;
-}
-
-@keyframes badgeDotPulse{
-  0%,100%{opacity:1;transform:scale(1)}
-  50%{opacity:.35;transform:scale(.75)}
+  background:var(--amber);
 }
 
 .quota-icon-wrap{
@@ -1533,7 +1511,7 @@ body.modal-open{overflow:hidden !important}
   user-select:none;
   transform-origin:center center;
   animation:hourglassTurn 4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-  filter:drop-shadow(0 4px 18px rgba(245,158,11,.35));
+  filter:none !important;
 }
 
 @keyframes hourglassTurn{
@@ -1555,15 +1533,15 @@ body.modal-open{overflow:hidden !important}
   font-size:clamp(1.4rem,3.4vw,1.85rem);
   font-weight:800;
   margin-bottom:12px;
-  background:linear-gradient(135deg,#fef3c7 0%,#f59e0b 55%,#d97706 100%);
-  -webkit-background-clip:text;
-  color:transparent;
+  color:var(--text);
+  background:none !important;
+  -webkit-background-clip:unset !important;
 }
 
 .quota-desc{
   position:relative;
   z-index:1;
-  color:#94a3b8;
+  color:var(--muted);
   font-size:.96rem;
   line-height:1.6;
   max-width:620px;
@@ -1571,7 +1549,7 @@ body.modal-open{overflow:hidden !important}
 }
 
 .quota-desc strong{
-  color:#f1f5f9;
+  color:var(--text);
 }
 
 .quota-grid{
@@ -1585,7 +1563,7 @@ body.modal-open{overflow:hidden !important}
   padding:16px 20px;
   border-radius:18px;
   background:rgba(255,255,255,.03);
-  border:1px solid rgba(245,158,11,.25);
+  border:1px solid var(--line);
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -1596,7 +1574,7 @@ body.modal-open{overflow:hidden !important}
 
 .quota-stat:hover{
   background:rgba(255,255,255,.05);
-  border-color:rgba(245,158,11,.4);
+  border-color:rgba(255,255,255,.15);
   transform:translateY(-2px);
 }
 

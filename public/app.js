@@ -357,7 +357,6 @@ async function loadMatches(silent = false) {
 
       $('#matches').innerHTML = `
         <div class="quota-warning-card">
-          <div class="quota-card-ambient"></div>
           <div class="quota-badge">
             <span class="quota-badge-dot"></span>
             Modo Protección de Cuota
