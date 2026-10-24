@@ -22,8 +22,9 @@ h1,h2,h3,.brand,.num{font-family:Outfit,sans-serif}
 .brand{font-size:1.5rem;font-weight:700;display:flex;gap:10px;align-items:center;flex-shrink:0;user-select:none}
 .brand b{background:linear-gradient(90deg,var(--green),var(--blue));-webkit-background-clip:text;color:transparent}
 .logo{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--green),var(--blue));font-size:1.2rem}
-.status-pill{font-size:.78rem;padding:6px 12px;border-radius:99px;border:1px solid var(--line);color:var(--muted);background:var(--card);flex-shrink:0;white-space:nowrap}
-.status-pill.live::before,.status-pill.demo::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 1.6s infinite}
+.status-pill{font-size:.8rem;padding:6px 14px;border-radius:99px;border:1px solid var(--line);color:var(--muted);background:var(--card);flex-shrink:0;white-space:nowrap;display:inline-flex;align-items:center;line-height:1;font-weight:500;transition:all .2s ease;cursor:default}
+.status-pill.live{color:#e2e8f0;border-color:rgba(46,229,157,.25);background:rgba(46,229,157,.06)}
+.status-pill.live::before,.status-pill.demo::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 1.6s infinite}
 .status-pill.demo::before{background:var(--amber);box-shadow:0 0 10px var(--amber)}
 @keyframes pulse{50%{opacity:.35}}
 

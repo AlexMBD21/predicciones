@@ -228,7 +228,8 @@ async function loadStatus() {
     const el = $('#status');
     if (el) {
       el.className = 'status-pill live';
-      el.textContent = `En vivo · ${s.provider}${s.gemini ? ' + Gemini' : ''}${s.supabase ? ' + Supabase ☁️' : ''}`;
+      el.textContent = 'En línea';
+      el.title = `Conectado: ${s.provider}${s.gemini ? ' + Gemini' : ''}${s.supabase ? ' + Supabase ☁️' : ''}`;
     }
   } catch {}
 }
