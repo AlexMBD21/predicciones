@@ -357,9 +357,11 @@ async function loadMatches(silent = false) {
 
       $('#matches').innerHTML = `
         <div class="quota-warning-card">
-          <div class="quota-badge">
-            <span class="quota-badge-dot"></span>
-            Modo Protección de Cuota
+          <div class="quota-badge-wrap">
+            <div class="quota-badge">
+              <span class="quota-badge-dot"></span>
+              Modo Protección de Cuota
+            </div>
           </div>
           <div class="quota-icon-wrap" aria-label="Reloj de arena animado">
             <svg class="hourglass-svg" viewBox="-14 -6 84 84" fill="none" xmlns="http://www.w3.org/2000/svg">

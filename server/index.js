@@ -71,7 +71,7 @@ export async function handler(req, res) {
     const sub = url.searchParams.get('path');
     if (sub) pathname = `/api/${sub}`;
   }
-  if (pathname.endsWith('.js')) {
+  if (pathname.startsWith('/api/') && pathname.endsWith('.js')) {
     pathname = pathname.slice(0, -3);
   }
 
