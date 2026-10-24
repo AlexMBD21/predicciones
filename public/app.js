@@ -348,12 +348,44 @@ async function loadMatches(silent = false) {
     await fetchMatches();
     renderFilters();
     if (state.warning && state.matches.length === 0) {
+      const now = new Date();
+      const resetUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+      const diffMs = Math.max(0, resetUtc.getTime() - now.getTime());
+      const hoursLeft = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutesLeft = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const resetLocalTime = resetUtc.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+
       $('#matches').innerHTML = `
         <div class="quota-warning-card">
-          <div class="quota-icon">⏳</div>
-          <h3>Límite diario de API-Football alcanzado (100/día)</h3>
-          <p>${esc(state.warning)}</p>
-          <small>La cuota se renueva a las 00:00 UTC. Todos los partidos y pronósticos analizados continúan disponibles y sincronizados en la nube con Supabase ☁️.</small>
+          <div class="quota-card-ambient"></div>
+          <div class="quota-badge">
+            <span class="quota-badge-dot"></span>
+            Modo Protección de Cuota
+          </div>
+          <div class="quota-icon-wrap">
+            <div class="quota-icon-halo"></div>
+            <div class="quota-icon">⏳</div>
+          </div>
+          <h3 class="quota-title">Límite Diario de Consultas Alcanzado</h3>
+          <p class="quota-desc">Has completado las <strong>100 peticiones gratuitas</strong> de API-Football para hoy. El sistema ha pausado las llamadas externas para proteger tu cuota.</p>
+          
+          <div class="quota-grid">
+            <div class="quota-stat">
+              <span class="quota-stat-label">Reinicio Automático de Cuota</span>
+              <span class="quota-stat-val">00:00 UTC <small>(${resetLocalTime})</small></span>
+              <span class="quota-stat-sub">En aproximadamente ${hoursLeft}h ${minutesLeft}m</span>
+            </div>
+          </div>
+
+          <div class="quota-actions">
+            <button type="button" class="quota-refresh-btn" onclick="retryQuotaCheck(this);">
+              <svg class="quota-refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+              Comprobar disponibilidad ahora
+            </button>
+          </div>
+          <div id="quotaRetryFeedback" class="quota-feedback-msg" role="status" aria-live="polite"></div>
         </div>`;
       return;
     }
@@ -362,6 +394,35 @@ async function loadMatches(silent = false) {
     if (!silent) $('#matches').innerHTML = `<div class="empty">No se pudieron cargar los partidos: ${esc(e.message)}</div>`;
   }
 }
+
+window.retryQuotaCheck = async function(btn) {
+  if (!btn) return;
+  btn.classList.add('loading');
+  const fb = $('#quotaRetryFeedback');
+  if (fb) {
+    fb.textContent = 'Consultando estado con el proveedor...';
+    fb.className = 'quota-feedback-msg active';
+  }
+
+  try {
+    await fetchMatches();
+    if (state.warning && state.matches.length === 0) {
+      if (fb) {
+        fb.textContent = '⏳ La cuota de API aún no se ha renovado. Se reactivará automáticamente a las 00:00 UTC.';
+        fb.className = 'quota-feedback-msg warning';
+      }
+    } else {
+      loadMatches();
+    }
+  } catch (err) {
+    if (fb) {
+      fb.textContent = '⚠️ Sin conexión con la API o cuota diaria todavía agotada.';
+      fb.className = 'quota-feedback-msg warning';
+    }
+  } finally {
+    btn.classList.remove('loading');
+  }
+};
 
 const phaseGroup = (m) => { const k = info(m).k; return k === 'live' || k === 'ht' ? 'live' : k === 'ft' ? 'ft' : k === 'ns' ? 'ns' : 'bad'; };
 

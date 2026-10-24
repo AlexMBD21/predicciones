@@ -13,12 +13,46 @@
   <meta name="description" content="Pronósticos de fútbol con IA: probabilidades 1X2, goles esperados, forma, bajas, alineaciones y localía en tiempo real." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=17" />
-  <link rel="stylesheet" href="/live.css?v=17" />
+  <link rel="stylesheet" href="/styles.css?v=19" />
+  <link rel="stylesheet" href="/live.css?v=19" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="logo">⚽</span><span>Prono<b>XI</b></span></div>
+    <div class="brand">
+      <span class="logo logo-animated" aria-label="Logo Balón">
+        <svg class="ball-svg" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="18" cy="18" r="17" fill="url(#ballGrad)" stroke="rgba(255,255,255,0.25)" stroke-width="1.2"/>
+          <polygon points="18,12 22.8,15.5 21,21 15,21 13.2,15.5" fill="#091024" stroke="url(#seamGrad)" stroke-width="1.2"/>
+          <line x1="18" y1="12" x2="18" y2="2" stroke="url(#seamGrad)" stroke-width="1.2"/>
+          <line x1="22.8" y1="15.5" x2="32" y2="12.5" stroke="url(#seamGrad)" stroke-width="1.2"/>
+          <line x1="21" y1="21" x2="28" y2="29" stroke="url(#seamGrad)" stroke-width="1.2"/>
+          <line x1="15" y1="21" x2="8" y2="29" stroke="url(#seamGrad)" stroke-width="1.2"/>
+          <line x1="13.2" y1="15.5" x2="4" y2="12.5" stroke="url(#seamGrad)" stroke-width="1.2"/>
+          <path d="M18,2 L14,5.5 L22,5.5 Z" fill="#091024"/>
+          <path d="M32,12.5 L34,17.5 L30.5,21 Z" fill="#091024"/>
+          <path d="M4,12.5 L2,17.5 L5.5,21 Z" fill="#091024"/>
+          <path d="M28,29 L23,33.5 L18,33.5 Z" fill="#091024"/>
+          <path d="M8,29 L13,33.5 L18,33.5 Z" fill="#091024"/>
+          <ellipse cx="14" cy="11" rx="8" ry="4" transform="rotate(-30 14 11)" fill="url(#shineGrad)" opacity="0.65"/>
+          <defs>
+            <radialGradient id="ballGrad" cx="30%" cy="25%" r="75%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="65%" stop-color="#e2e8f0"/>
+              <stop offset="100%" stop-color="#94a3b8"/>
+            </radialGradient>
+            <linearGradient id="seamGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#2ee59d"/>
+              <stop offset="100%" stop-color="#18bfff"/>
+            </linearGradient>
+            <linearGradient id="shineGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="transparent"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </span>
+      <span>Prono<b>Bello</b></span>
+    </div>
     <div class="search-wrap" id="searchWrap">
       <div class="search-box">
         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -48,6 +82,6 @@
     <div class="drawer-backdrop" data-close></div>
     <aside class="drawer-panel" id="panel"></aside>
   </div>
-  <script src="/app.js?v=17" type="module"></script>
+  <script src="/app.js?v=19" type="module"></script>
 </body>
 </html>
