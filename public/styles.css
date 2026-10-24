@@ -1527,33 +1527,33 @@ body.modal-open{overflow:hidden !important}
   }
 }
 
-.sand-bulb-top{
+.sand-top-rect{
   animation:sandTopFlow 7s ease-in-out infinite;
 }
 
 @keyframes sandTopFlow{
-  0%   { transform: scaleY(1); transform-origin: 28px 35px; }
-  30%  { transform: scaleY(0); transform-origin: 28px 35px; }
-  43%  { transform: scaleY(0); transform-origin: 28px 11px; }
-  50%  { transform: scaleY(0); transform-origin: 28px 11px; }
-  80%  { transform: scaleY(1); transform-origin: 28px 11px; }
-  93%  { transform: scaleY(1); transform-origin: 28px 11px; }
-  100% { transform: scaleY(1); transform-origin: 28px 35px; }
+  0%   { transform: scaleY(1); transform-origin: 28px 36px; }
+  30%  { transform: scaleY(0); transform-origin: 28px 36px; }
+  43%  { transform: scaleY(0); transform-origin: 28px 9px; }
+  50%  { transform: scaleY(0); transform-origin: 28px 9px; }
+  80%  { transform: scaleY(1); transform-origin: 28px 9px; }
+  93%  { transform: scaleY(1); transform-origin: 28px 9px; }
+  100% { transform: scaleY(1); transform-origin: 28px 36px; }
 }
 
-.sand-bulb-bottom{
+.sand-bottom-pile{
   animation:sandBottomFlow 7s ease-in-out infinite;
 }
 
 @keyframes sandBottomFlow{
-  0%   { transform: scaleY(0); transform-origin: 28px 61px; }
-  5%   { transform: scaleY(0); transform-origin: 28px 61px; }
-  30%  { transform: scaleY(1); transform-origin: 28px 61px; }
+  0%   { transform: scaleY(0); transform-origin: 28px 63px; }
+  5%   { transform: scaleY(0); transform-origin: 28px 63px; }
+  30%  { transform: scaleY(1); transform-origin: 28px 63px; }
   43%  { transform: scaleY(1); transform-origin: 28px 37px; }
   50%  { transform: scaleY(1); transform-origin: 28px 37px; }
   80%  { transform: scaleY(0); transform-origin: 28px 37px; }
-  93%  { transform: scaleY(0); transform-origin: 28px 61px; }
-  100% { transform: scaleY(0); transform-origin: 28px 61px; }
+  93%  { transform: scaleY(0); transform-origin: 28px 63px; }
+  100% { transform: scaleY(0); transform-origin: 28px 63px; }
 }
 
 .sand-stream-down{

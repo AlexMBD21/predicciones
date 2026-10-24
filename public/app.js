@@ -369,30 +369,41 @@ async function loadMatches(silent = false) {
                   <stop offset="45%" stop-color="#fbbf24"/>
                   <stop offset="100%" stop-color="#d97706"/>
                 </linearGradient>
+
+                <!-- Máscara de recorte interior del cristal para que la arena nunca se salga -->
+                <clipPath id="glassInnerClip">
+                  <path d="M15 9 L41 9 C41 21.5 31 31.5 28.5 35 L27.5 35 C25 31.5 15 21.5 15 9 Z M27.5 37 L28.5 37 C31 40.5 41 50.5 41 63 L15 63 C15 50.5 25 40.5 27.5 37 Z"/>
+                </clipPath>
               </defs>
               <g class="hourglass-rotator">
-                <!-- Cristal del reloj -->
-                <path class="glass-body" d="M14 9 L42 9 C42 22 32 32 29.5 35 L29.5 37 C32 40 42 50 42 63 L14 63 C14 50 24 40 26.5 37 L26.5 35 C24 32 14 22 14 9 Z" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" stroke-linejoin="round"/>
-                
-                <!-- Arena bulbo superior -->
-                <path class="sand-bulb-top" d="M16 11 L40 11 C40 21 31 31 28 35 C25 31 16 21 16 11 Z" fill="url(#sandGrad)"/>
-                
-                <!-- Chorro cayendo fase 1 (hacia abajo) -->
-                <line class="sand-stream-down" x1="28" y1="35" x2="28" y2="61" stroke="url(#sandGrad)" stroke-width="1.6" stroke-linecap="round"/>
-                
-                <!-- Chorro cayendo fase 2 (invertido) -->
-                <line class="sand-stream-up" x1="28" y1="37" x2="28" y2="11" stroke="url(#sandGrad)" stroke-width="1.6" stroke-linecap="round"/>
-                
-                <!-- Arena bulbo inferior -->
-                <path class="sand-bulb-bottom" d="M16 61 C16 52 24 43 28 38 C32 43 40 52 40 61 Z" fill="url(#sandGrad)"/>
+                <!-- Fondo interior del cristal -->
+                <path class="glass-bg" d="M14 8.5 L42 8.5 C42 22 31.5 32 29 35.5 L29 36.5 C31.5 40 42 50 42 63.5 L14 63.5 C14 50 24.5 40 27 36.5 L27 35.5 C24.5 32 14 22 14 8.5 Z" fill="rgba(255,255,255,0.05)"/>
+
+                <!-- Arena sellada y confinada 100% dentro del cristal -->
+                <g clip-path="url(#glassInnerClip)">
+                  <!-- Arena bulbo superior (desciende hacia el cuello) -->
+                  <rect class="sand-top-rect" x="12" y="9" width="32" height="27" fill="url(#sandGrad)"/>
+                  
+                  <!-- Chorro cayendo fase 1 (hacia abajo) -->
+                  <line class="sand-stream-down" x1="28" y1="35" x2="28" y2="62" stroke="url(#sandGrad)" stroke-width="1.8" stroke-linecap="round"/>
+                  
+                  <!-- Chorro cayendo fase 2 (invertido) -->
+                  <line class="sand-stream-up" x1="28" y1="37" x2="28" y2="10" stroke="url(#sandGrad)" stroke-width="1.8" stroke-linecap="round"/>
+                  
+                  <!-- Arena bulbo inferior (montículo que sube) -->
+                  <path class="sand-bottom-pile" d="M13 63 C18 53 24 42 28 39 C32 42 38 53 43 63 Z" fill="url(#sandGrad)"/>
+                </g>
+
+                <!-- Paredes exteriores de cristal -->
+                <path class="glass-border" d="M14 8.5 L42 8.5 C42 22 31.5 32 29 35.5 L29 36.5 C31.5 40 42 50 42 63.5 L14 63.5 C14 50 24.5 40 27 36.5 L27 35.5 C24.5 32 14 22 14 8.5 Z" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linejoin="round"/>
 
                 <!-- Reflejos de cristal -->
-                <path d="M18 13 C18 22 25 29 27 34" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-linecap="round"/>
-                <path d="M18 59 C18 50 25 43 27 38" stroke="rgba(255,255,255,0.25)" stroke-width="1.2" stroke-linecap="round"/>
+                <path d="M18 12 C18 20 25 28 27 33" stroke="rgba(255,255,255,0.4)" stroke-width="1.2" stroke-linecap="round"/>
+                <path d="M18 60 C18 52 25 44 27 39" stroke="rgba(255,255,255,0.25)" stroke-width="1.2" stroke-linecap="round"/>
 
                 <!-- Tapas superior e inferior -->
-                <rect x="11" y="5" width="34" height="4.5" rx="2" fill="#334155" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
-                <rect x="11" y="62.5" width="34" height="4.5" rx="2" fill="#334155" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+                <rect x="11" y="4.5" width="34" height="4.5" rx="2" fill="#334155" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+                <rect x="11" y="63" width="34" height="4.5" rx="2" fill="#334155" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
               </g>
             </svg>
           </div>
