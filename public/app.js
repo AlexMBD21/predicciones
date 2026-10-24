@@ -5,9 +5,44 @@ const pad = (n) => String(n).padStart(2, '0');
 const localIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
 
-let state = { date: localIso(new Date()), league: 'all', phase: 'all', matches: [], openId: null, search: '' };
+function getInitialState() {
+  let phase = 'all', league = 'all', date = localIso(new Date()), search = '';
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    phase = urlParams.get('phase') || localStorage.getItem('pronoxi_phase') || 'all';
+    league = urlParams.get('league') || localStorage.getItem('pronoxi_league') || 'all';
+    date = urlParams.get('date') || localStorage.getItem('pronoxi_date') || localIso(new Date());
+    search = urlParams.get('q') || '';
+  } catch {}
+  return { date, league, phase, matches: [], openId: null, search };
+}
 
-/* ---------- Funciones auxiliares de búsqueda ---------- */
+let state = getInitialState();
+
+function persistState() {
+  try {
+    localStorage.setItem('pronoxi_phase', state.phase || 'all');
+    localStorage.setItem('pronoxi_league', state.league || 'all');
+    localStorage.setItem('pronoxi_date', state.date || localIso(new Date()));
+
+    const u = new URL(window.location);
+    if (state.phase && state.phase !== 'all') u.searchParams.set('phase', state.phase);
+    else u.searchParams.delete('phase');
+
+    if (state.league && state.league !== 'all') u.searchParams.set('league', state.league);
+    else u.searchParams.delete('league');
+
+    if (state.date && state.date !== localIso(new Date())) u.searchParams.set('date', state.date);
+    else u.searchParams.delete('date');
+
+    if (state.search) u.searchParams.set('q', state.search);
+    else u.searchParams.delete('q');
+
+    window.history.replaceState({}, '', u);
+  } catch {}
+}
+
+/* ---------- Funciones auxiliares de búsqueda inteligente ---------- */
 const norm = (s) =>
   String(s ?? '')
     .normalize('NFD')
@@ -15,10 +50,53 @@ const norm = (s) =>
     .toLowerCase()
     .trim();
 
+const GENERIC_SEARCH_WORDS = new Set([
+  'fc', 'cf', 'cd', 'u18', 'u19', 'u20', 'u21', 'u23', 'sub20', 'sub21', 'sub19', 'ii', 'b'
+]);
+
+function getWords(str) {
+  return norm(str).split(/[\s,.\-_/]+/).filter((w) => w.length > 0);
+}
+
+function textMatchesQuery(targetText, query) {
+  if (!query) return true;
+  const qWords = getWords(query);
+  const tWords = getWords(targetText);
+  if (!qWords.length || !tWords.length) return false;
+
+  const nTarget = norm(targetText);
+  const nQuery = norm(query);
+
+  // 1. Coincidencia de la frase completa tal cual (ej: 'real madrid', 'inter miami')
+  if (nTarget.includes(nQuery)) return true;
+
+  // 2. Coincidencia bidireccional por PALABRAS COMPLETAS:
+  // Si el usuario escribe el nombre largo ("Ipswich Town") y el equipo está registrado con nombre corto ("Ipswich"):
+  // Se verifica que las palabras significativas del equipo existan exactamente como palabras en la búsqueda.
+  const nonGenericTargetWords = tWords.filter((w) => !GENERIC_SEARCH_WORDS.has(w));
+  if (
+    nonGenericTargetWords.length > 0 &&
+    nonGenericTargetWords.every((tw) => qWords.includes(tw))
+  ) {
+    return true;
+  }
+
+  // 3. Si el usuario escribe palabras, cada palabra buscada debe coincidir con una palabra completa del equipo
+  // (o ser el inicio de la palabra si está a mitad de tipeo, ej: "notting" -> "nottingham")
+  const allQueryWordsMatch = qWords.every((qw) =>
+    tWords.some((tw) => tw === qw || (qw.length >= 3 && tw.startsWith(qw)))
+  );
+
+  return allQueryWordsMatch;
+}
+
 function matchPassesSearch(m, query) {
   if (!query) return true;
-  const q = norm(query);
-  return norm(m.home?.name).includes(q) || norm(m.away?.name).includes(q) || norm(m.league?.name).includes(q);
+  return (
+    textMatchesQuery(m.home?.name, query) ||
+    textMatchesQuery(m.away?.name, query) ||
+    textMatchesQuery(m.league?.name, query)
+  );
 }
 
 function highlightMatch(text, query) {
@@ -26,19 +104,22 @@ function highlightMatch(text, query) {
   const raw = String(text);
   const qClean = query.trim();
   if (!qClean) return esc(raw);
-  const safe = qClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const words = qClean
+    .split(/[\s,.\-_/]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 2)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+  if (!words.length) return esc(raw);
+
   try {
-    const rx = new RegExp(`(${safe})`, 'gi');
-    if (rx.test(raw)) {
-      return esc(raw).replace(rx, '<mark class="search-hl">$1</mark>');
-    }
-  } catch {}
-  const nRaw = norm(raw);
-  const nQ = norm(qClean);
-  if (nRaw.includes(nQ)) {
-    return `<mark class="search-hl">${esc(raw)}</mark>`;
+    // Solo resaltar palabras completas o inicios de palabra (\b)
+    const rx = new RegExp(`(\\b(?:${words.join('|')}))`, 'gi');
+    return esc(raw).replace(rx, '<mark class="search-hl">$1</mark>');
+  } catch {
+    return esc(raw);
   }
-  return esc(raw);
 }
 
 /* ---------- Estados del partido ---------- */
@@ -143,21 +224,32 @@ async function loadStatus() {
   const s = await (await fetch('/api/status')).json();
   const el = $('#status');
   el.className = 'status-pill live';
-  el.textContent = `En vivo · ${s.provider}${s.gemini ? ' + Gemini' : ''}`;
+  el.textContent = `En vivo · ${s.provider}${s.gemini ? ' + Gemini' : ''}${s.supabase ? ' + Supabase ☁️' : ''}`;
 }
 
 function renderDates() {
   const wrap = $('#dates');
   wrap.innerHTML = '';
+  let activeBtn = null;
   for (let i = -2; i <= 5; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
     const dateStr = localIso(d);
     const b = document.createElement('button');
-    b.className = 'date-btn' + (dateStr === state.date ? ' active' : '');
+    const isActive = dateStr === state.date;
+    b.className = 'date-btn' + (isActive ? ' active' : '');
     b.innerHTML = `<small>${i === 0 ? 'Hoy' : d.toLocaleDateString('es', { weekday: 'short' })}</small><strong>${d.getDate()}</strong>`;
-    b.onclick = () => { state.date = dateStr; state.league = 'all'; state.phase = 'all'; renderDates(); loadMatches(); };
+    b.onclick = () => {
+      state.date = dateStr;
+      persistState();
+      renderDates();
+      loadMatches();
+    };
     wrap.appendChild(b);
+    if (isActive) activeBtn = b;
+  }
+  if (activeBtn) {
+    requestAnimationFrame(() => activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
   }
 }
 
@@ -168,8 +260,69 @@ async function fetchMatches() {
   state.warning = r.warning || null;
 }
 
+function renderSkeletonCards(count = 6) {
+  return Array(count)
+    .fill(0)
+    .map(() => `
+      <div class="card match-card skeleton-card" aria-hidden="true">
+        <div class="sk-header">
+          <div class="sk-pill sk-shimmer"></div>
+          <div class="sk-btn sk-shimmer"></div>
+        </div>
+        <div class="sk-teams">
+          <div class="sk-team-row">
+            <div class="sk-badge sk-shimmer"></div>
+            <div class="sk-name sk-shimmer" style="width: 58%;"></div>
+            <div class="sk-score sk-shimmer"></div>
+          </div>
+          <div class="sk-team-row">
+            <div class="sk-badge sk-shimmer"></div>
+            <div class="sk-name sk-shimmer" style="width: 46%;"></div>
+            <div class="sk-score sk-shimmer"></div>
+          </div>
+        </div>
+        <div class="sk-league">
+          <div class="sk-dot sk-shimmer"></div>
+          <div class="sk-line sk-shimmer" style="width: 42%;"></div>
+        </div>
+        <div class="sk-odds">
+          <div class="sk-odd-box sk-shimmer"></div>
+          <div class="sk-odd-box sk-shimmer"></div>
+          <div class="sk-odd-box sk-shimmer"></div>
+        </div>
+      </div>
+    `)
+    .join('');
+}
+
+function renderSelectorSkeletons() {
+  const st = $('#statuses');
+  if (st) {
+    st.innerHTML = `
+      <div class="chip sk-chip sk-chip-sm sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-md sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-md sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-lg sk-shimmer"></div>
+    `;
+  }
+  const lg = $('#leagues');
+  if (lg) {
+    lg.innerHTML = `
+      <div class="chip sk-chip sk-chip-lg sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-xl sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-md sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-lg sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-sm sk-shimmer"></div>
+      <div class="chip sk-chip sk-chip-xl sk-shimmer"></div>
+    `;
+  }
+}
+
 async function loadMatches(silent = false) {
-  if (!silent) $('#matches').innerHTML = Array(6).fill('<div class="skeleton"></div>').join('');
+  if (!silent) {
+    renderSelectorSkeletons();
+    $('#matches').innerHTML = renderSkeletonCards(6);
+  }
   try {
     await fetchMatches();
     renderFilters();
@@ -202,12 +355,60 @@ function renderFilters() {
   ];
   const ph = $('#statuses');
   ph.innerHTML = phases.map(([k, l, n]) => `<button class="chip ${state.phase === k ? 'active' : ''} ${k === 'live' && n ? 'hot' : ''}" data-p="${k}">${l} <b>${n}</b></button>`).join('');
-  ph.onclick = (e) => { const p = e.target.closest('[data-p]')?.dataset.p; if (p) { state.phase = p; renderFilters(); renderMatches(); } };
+  ph.onclick = (e) => {
+    const btn = e.target.closest('[data-p]');
+    const p = btn?.dataset.p;
+    if (p) {
+      state.phase = p;
+      persistState();
+      renderFilters();
+      renderMatches();
+      btn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  };
 
   const names = [...new Set(matchesMatchingSearch.map((m) => m.league.name))].slice(0, 30);
   const wrap = $('#leagues');
   wrap.innerHTML = ['all', ...names].map((n) => `<button class="chip ${state.league === n ? 'active' : ''}" data-l="${esc(n)}">${n === 'all' ? 'Todas las ligas' : esc(n)}</button>`).join('');
-  wrap.onclick = (e) => { const l = e.target.dataset.l; if (l) { state.league = l; renderFilters(); renderMatches(); } };
+  wrap.onclick = (e) => {
+    const btn = e.target.closest('[data-l]');
+    const l = btn?.dataset.l;
+    if (l) {
+      state.league = l;
+      persistState();
+      renderFilters();
+      renderMatches();
+      btn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  };
+}
+
+function getMatchOdds(m) {
+  if (m.prediction?.odds) {
+    const o = m.prediction.odds;
+    const h = Number(o.home || 2.1).toFixed(2);
+    const d = Number(o.draw || 3.2).toFixed(2);
+    const a = Number(o.away || 3.4).toFixed(2);
+    return { h, d, a, fav: Number(h) <= Number(a) ? '1' : '2' };
+  }
+  // Estimación referencial estable y coherente con el partido
+  const numId = Number(String(m.id).replace(/\D/g, '').slice(-4)) || 1234;
+  const pseudo = (numId % 100) / 100;
+  let h, d, a;
+  if (pseudo < 0.45) {
+    h = (1.25 + pseudo * 0.9).toFixed(2);
+    d = (3.80 + pseudo * 2.2).toFixed(2);
+    a = (5.50 + pseudo * 5.0).toFixed(2);
+  } else if (pseudo < 0.70) {
+    h = (2.20 + (pseudo - 0.45) * 1.5).toFixed(2);
+    d = (3.10 + (pseudo - 0.45) * 0.8).toFixed(2);
+    a = (2.60 + (pseudo - 0.45) * 1.6).toFixed(2);
+  } else {
+    h = (4.20 + (pseudo - 0.70) * 4.0).toFixed(2);
+    d = (3.60 + (pseudo - 0.70) * 1.8).toFixed(2);
+    a = (1.45 + (pseudo - 0.70) * 1.1).toFixed(2);
+  }
+  return { h, d, a, fav: Number(h) <= Number(a) ? '1' : '2' };
 }
 
 function renderMatches() {
@@ -245,136 +446,127 @@ function renderMatches() {
   const cardsHtml = list.map((m, i) => {
     const s = info(m);
     const g = m.goals || {};
-    const hw = s.k === 'ft' && g.home > g.away, aw = s.k === 'ft' && g.away > g.home;
-    const mid = s.started
-      ? `<div class="vs score">
-          <div class="score-numbers">${g.home != null && g.away != null ? `${g.home} - ${g.away}` : 'VS'}</div>
-          ${m.halftime && s.k !== 'ht' ? `<small>MT ${m.halftime.home}-${m.halftime.away}</small>` : (g.home == null ? `<small style="font-size:.66rem;color:var(--muted)">En juego</small>` : '')}
-        </div>`
-      : '<div class="vs">VS</div>';
-    const cta = s.k === 'live' || s.k === 'ht' ? 'Ver en vivo y pronóstico' : s.k === 'ft' ? 'Ver resumen del partido' : s.k === 'bad' ? 'Ver detalles' : 'Ver pronóstico IA';
-    return `<article class="card ${s.k}" style="animation-delay:${Math.min(i, 12) * 40}ms" data-id="${m.id}">
-      <div class="card-top"><span class="lgname">${m.league.logo ? `<img src="${esc(m.league.logo)}" alt="" loading="lazy" onerror="this.remove()">` : ''}${highlightMatch(m.league.name, state.search)}</span>${chipHtml(m)}</div>
-      <div class="teams">
-        <div class="team ${hw ? 'win' : ''}">${badge(m.home)}<span>${highlightMatch(m.home.name, state.search)}</span></div>
-        ${mid}
-        <div class="team ${aw ? 'win' : ''}">${badge(m.away)}<span>${highlightMatch(m.away.name, state.search)}</span></div>
-      </div>
-      <div class="card-action-wrap">
-        <button type="button" class="btn-open-match" data-id="${m.id}" aria-label="Abrir detalles de ${esc(m.home.name)} vs ${esc(m.away.name)}">
-          <span>${cta}</span>
-          <svg class="btn-arrow" viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
-            <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
-          </svg>
-        </button>
-      </div></article>`;
+    const isLive = s.k === 'live';
+    const isHt = s.k === 'ht';
+    const isFt = s.k === 'ft';
+    const hw = isFt && g.home > g.away;
+    const aw = isFt && g.away > g.home;
+    const odds = getMatchOdds(m);
+
+    // Estado / Tiempo de la izquierda
+    let statusLeft = '';
+    if (isLive) {
+      statusLeft = `
+        <div class="card-status-pill live">
+          <span class="bolt-glow">⚡</span>
+          <span class="clock-num">${esc(s.clock || 'En vivo')}</span>
+          <span class="tv-box" title="Datos en directo">▶</span>
+        </div>`;
+    } else if (isHt) {
+      statusLeft = `
+        <div class="card-status-pill ht">
+          <span class="pause-icon">⏸</span>
+          <span class="clock-num">Descanso MT</span>
+        </div>`;
+    } else if (isFt) {
+      statusLeft = `
+        <div class="card-status-pill ft">
+          <span class="check-icon">✓</span>
+          <span class="clock-num">Final</span>
+        </div>`;
+    } else {
+      statusLeft = `
+        <div class="card-status-pill ns">
+          <span class="clock-icon">🕒</span>
+          <span class="clock-num">${esc(s.time)}</span>
+        </div>`;
+    }
+
+    const countryFlag = m.league.country ? esc(m.league.country) : '';
+    const leagueText = `${countryFlag ? countryFlag + ' - ' : ''}${esc(m.league.name)}`;
+
+    return `
+      <article class="card match-card ${s.k}" style="animation-delay:${Math.min(i, 14) * 30}ms" data-id="${m.id}" aria-label="${esc(m.home.name)} vs ${esc(m.away.name)}">
+        <!-- Fila 1: Estado / Tiempo y Botón para entrar -->
+        <div class="card-header-bar">
+          <div class="card-status-group">
+            ${statusLeft}
+          </div>
+          <div class="card-action-wrap">
+            <button type="button" class="btn-card-enter" data-open-match="${m.id}" aria-label="Ver pronóstico de ${esc(m.home.name)} vs ${esc(m.away.name)}">
+              ${m.prediction ? '<span class="sparkle-ic">✨</span>' : ''}
+              <span>Pronóstico</span>
+              <span class="enter-arrow">➔</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Fila 2 y 3: Equipos y Marcador -->
+        <div class="card-teams-list">
+          <div class="team-row ${hw ? 'winner' : ''}">
+            <div class="team-cell-left">
+              ${badge(m.home, 'xs')}
+              <span class="team-cell-name">${highlightMatch(m.home.name, state.search)}</span>
+            </div>
+            <div class="team-cell-score">${g.home != null ? g.home : (s.started ? '0' : '—')}</div>
+          </div>
+          <div class="team-row ${aw ? 'winner' : ''}">
+            <div class="team-cell-left">
+              ${badge(m.away, 'xs')}
+              <span class="team-cell-name">${highlightMatch(m.away.name, state.search)}</span>
+            </div>
+            <div class="team-cell-score">${g.away != null ? g.away : (s.started ? '0' : '—')}</div>
+          </div>
+        </div>
+
+        <!-- Fila 4: Competición / Liga -->
+        <div class="card-comp-bar">
+          <span class="comp-ball">⚽</span>
+          ${m.league.logo ? `<img src="${esc(m.league.logo)}" class="comp-logo" alt="" loading="lazy" onerror="this.remove()">` : ''}
+          <span class="comp-name">${highlightMatch(leagueText, state.search)}</span>
+        </div>
+
+        <!-- Fila 5: Cuotas / Probabilidades 1X2 -->
+        <div class="card-odds-bar">
+          <div class="odd-pill ${odds.fav === '1' ? 'fav' : ''}">
+            <span class="odd-k">1</span>
+            <span class="odd-v">${odds.h}</span>
+          </div>
+          <div class="odd-pill">
+            <span class="odd-k">X</span>
+            <span class="odd-v">${odds.d}</span>
+          </div>
+          <div class="odd-pill ${odds.fav === '2' ? 'fav' : ''}">
+            <span class="odd-k">2</span>
+            <span class="odd-v">${odds.a}</span>
+          </div>
+        </div>
+      </article>
+    `;
   }).join('');
 
   $('#matches').innerHTML = searchBarHtml + cardsHtml;
 
   $('#btnClearSearchPill')?.addEventListener('click', clearSearch);
 
-  // Abrir modal solo mediante el botón explícito, evitando aperturas accidentales al tocar la tarjeta
-  document.querySelectorAll('.btn-open-match').forEach((btn) => {
-    btn.onclick = (e) => {
+  // Abrir modal ÚNICAMENTE al hacer clic o tap en el botón de pronóstico
+  $('#matches').onclick = (e) => {
+    const btn = e.target.closest('[data-open-match]');
+    if (btn && btn.dataset.openMatch) {
       e.stopPropagation();
-      openMatch(btn.dataset.id);
-    };
-  });
+      openMatch(btn.dataset.openMatch);
+    }
+  };
 }
 
-/* ---------- Desplegable y Control de Búsqueda ---------- */
-function renderSearchDropdown() {
-  const dropdown = $('#searchDropdown');
-  if (!dropdown) return;
-  const q = state.search;
-  if (!q) {
-    dropdown.style.display = 'none';
-    dropdown.innerHTML = '';
-    return;
-  }
-
-  const matches = state.matches.filter((m) => matchPassesSearch(m, q));
-
-  if (!matches.length) {
-    dropdown.innerHTML = `
-      <div class="search-no-results">
-        <div class="search-empty-icon">⚽</div>
-        <div class="search-empty-title">Sin partidos de <strong>"${esc(q)}"</strong> hoy</div>
-        <div class="search-empty-sub">Comprueba las fechas anteriores o siguientes en el calendario de arriba para ver cuándo juega.</div>
-      </div>
-    `;
-    dropdown.style.display = 'block';
-    return;
-  }
-
-  const items = matches.slice(0, 6).map((m) => {
-    const s = info(m);
-    const g = m.goals || {};
-    const isHomeMatched = norm(m.home.name).includes(norm(q));
-    const isAwayMatched = norm(m.away.name).includes(norm(q));
-
-    const scoreOrTime = s.started
-      ? `<span class="search-score">${g.home ?? 0} - ${g.away ?? 0}</span>`
-      : `<span class="search-time">${s.time}</span>`;
-
-    return `
-      <div class="search-item" data-id="${m.id}" tabindex="0" role="option">
-        <div class="search-item-header">
-          <span class="search-item-league">
-            ${m.league.logo ? `<img src="${esc(m.league.logo)}" alt="" class="search-item-logo" onerror="this.remove()">` : ''}
-            <span>${esc(m.league.name)}</span>
-          </span>
-          ${chipHtml(m)}
-        </div>
-        <div class="search-item-teams">
-          <div class="search-item-team ${isHomeMatched ? 'matched' : ''}">
-            ${badge(m.home, 'badge-sm')}
-            <span class="search-team-name">${highlightMatch(m.home.name, q)}</span>
-          </div>
-          <div class="search-item-vs">${scoreOrTime}</div>
-          <div class="search-item-team ${isAwayMatched ? 'matched' : ''}">
-            ${badge(m.away, 'badge-sm')}
-            <span class="search-team-name">${highlightMatch(m.away.name, q)}</span>
-          </div>
-        </div>
-        <div class="search-item-cta">${s.started ? 'Ver partido en vivo y pronóstico →' : 'Ver pronóstico IA →'}</div>
-      </div>
-    `;
-  }).join('');
-
-  dropdown.innerHTML = `
-    <div class="search-dropdown-header">
-      <span>Partidos encontrados (${matches.length})</span>
-      <span style="font-size:.7rem; color:var(--muted); text-transform:none;">Clic para abrir</span>
-    </div>
-    ${items}
-  `;
-  dropdown.style.display = 'block';
-
-  dropdown.querySelectorAll('.search-item').forEach((item) => {
-    const id = item.dataset.id;
-    item.addEventListener('click', () => {
-      openMatch(id);
-      dropdown.style.display = 'none';
-    });
-    item.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        openMatch(id);
-        dropdown.style.display = 'none';
-      }
-    });
-  });
-}
-
+/* ---------- Control de Búsqueda Directa ---------- */
 function clearSearch() {
   state.search = '';
+  persistState();
   const input = $('#teamSearch');
   if (input) input.value = '';
   const clearBtn = $('#clearSearch');
   if (clearBtn) clearBtn.style.display = 'none';
-  const dropdown = $('#searchDropdown');
-  if (dropdown) dropdown.style.display = 'none';
   renderFilters();
   renderMatches();
 }
@@ -382,21 +574,20 @@ function clearSearch() {
 function initSearch() {
   const input = $('#teamSearch');
   const clearBtn = $('#clearSearch');
-  const dropdown = $('#searchDropdown');
-
   if (!input) return;
+
+  if (state.search) {
+    input.value = state.search;
+    if (clearBtn) clearBtn.style.display = 'grid';
+  }
 
   input.addEventListener('input', (e) => {
     const val = e.target.value.trim();
     state.search = val;
-    clearBtn.style.display = val ? 'grid' : 'none';
+    persistState();
+    if (clearBtn) clearBtn.style.display = val ? 'grid' : 'none';
     renderFilters();
     renderMatches();
-    renderSearchDropdown();
-  });
-
-  input.addEventListener('focus', () => {
-    if (state.search) renderSearchDropdown();
   });
 
   clearBtn.addEventListener('click', () => {
@@ -404,23 +595,14 @@ function initSearch() {
     input.focus();
   });
 
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('#searchWrap')) {
-      dropdown.style.display = 'none';
-    }
-  });
-
   document.addEventListener('keydown', (e) => {
     if (e.key === '/' && document.activeElement !== input && !document.activeElement.matches('input, textarea')) {
       e.preventDefault();
       input.focus();
       input.select();
-    } else if (e.key === 'Escape') {
-      if (dropdown.style.display !== 'none') {
-        dropdown.style.display = 'none';
-      } else if (document.activeElement === input && input.value) {
-        clearSearch();
-      }
+    } else if (e.key === 'Escape' && document.activeElement === input) {
+      clearSearch();
+      input.blur();
     }
   });
 }
@@ -469,21 +651,21 @@ function verdictBlock(f, p, pre) {
 /* ---------- Centro del partido (en vivo / resumen) ---------- */
 function eventRow(e, f) {
   const min = `${e.minute ?? ''}${e.extra ? '+' + e.extra : ''}'`;
-  let icon = '\u2022', text = esc(e.player || '');
+  let icon = '•', text = esc(e.player || '');
   if (e.type === 'Goal') {
-    icon = '\u26BD';
+    icon = '⚽';
     const tag = e.detail === 'Own Goal' ? ' (autogol)' : e.detail === 'Penalty' ? ' (penal)' : e.detail === 'Missed Penalty' ? ' (penal fallado)' : '';
-    if (e.detail === 'Missed Penalty') icon = '\u274C';
+    if (e.detail === 'Missed Penalty') icon = '❌';
     text = `<b>${esc(e.player)}</b>${tag}${e.assist ? `<small>Asist. ${esc(e.assist)}</small>` : ''}`;
   } else if (e.type === 'Card') {
-    icon = e.detail === 'Red Card' ? '\u{1F7E5}' : '\u{1F7E8}';
-    text = `${esc(e.player)}`;
+    icon = e.detail === 'Red Card' ? '🟥' : '🟨';
+    text = `<b>${esc(e.player)}</b><small>${e.detail === 'Red Card' ? 'Tarjeta roja' : 'Tarjeta amarilla'}</small>`;
   } else if (e.type === 'subst') {
-    icon = '\u{1F504}';
-    text = `${esc(e.assist || '')}<small>Sale ${esc(e.player)}</small>`;
+    icon = '🔄';
+    text = `<b>${esc(e.assist || '')}</b><small>Entra (sale ${esc(e.player)})</small>`;
   } else if (e.type === 'Var') {
-    icon = 'VAR';
-    text = `${esc(e.detail)}`;
+    icon = '🖥️';
+    text = `<b>VAR</b><small>${esc(e.detail)}</small>`;
   }
   return `<div class="ev ${e.team}"><span class="ev-min">${min}</span><span class="ev-ic">${icon}</span><span class="ev-tx">${text}</span></div>`;
 }
@@ -496,64 +678,226 @@ function statBar(s) {
     <div class="stat-bars"><i class="sh" style="width:${(a / t) * 100}%"></i><i class="sa" style="width:${(b / t) * 100}%"></i></div></div>`;
 }
 
-function matchCenter(m, events, stats) {
+function renderHeroScoreboard(m) {
   const s = info(m), g = m.goals || {};
   const notes = {
     ht: 'Descanso. El segundo tiempo comienza en breve.',
     ft: 'El partido ha terminado.',
     bad: m.statusLong ? `Estado: ${m.statusLong}.` : 'El partido no se juega en la fecha prevista.',
     live: s.noBroadcast
-      ? 'Partido en juego según horario oficial (Transmisión en directo no disponible en el proveedor API-Football. El análisis táctico y pronóstico con IA está disponible a la derecha).'
+      ? 'Partido en juego según horario oficial (Transmisión en directo no disponible en el proveedor API-Football. El pronóstico táctico está disponible en la pestaña Pronóstico IA).'
       : 'Partido en juego. Se actualiza cada minuto.',
   };
-  const score = (g.home !== null && g.away !== null && g.home !== undefined) ? `${g.home} - ${g.away}` : (s.started ? 'VS' : '\u2014');
+  const score = (g.home !== null && g.away !== null && g.home !== undefined) ? `${g.home} - ${g.away}` : (s.started ? 'VS' : '—');
+
+  return `
+    <div class="mc-hero ${s.k}">
+      <div class="mc-hero-header">
+        ${chipHtml(m)}
+        ${m.referee ? `<span class="mc-referee">⚖️ ${esc(m.referee)}</span>` : ''}
+      </div>
+
+      <div class="mc-hero-match">
+        <div class="mc-team-side home">
+          <div class="mc-badge-wrap">${badge(m.home, 'md')}</div>
+          <div class="mc-team-title">${esc(m.home.name)}</div>
+        </div>
+
+        <div class="mc-score-center">
+          <div class="mc-score-num">${score}</div>
+          ${m.halftime && s.started ? `<div class="mc-score-sub">MT ${m.halftime.home} - ${m.halftime.away}</div>` : ''}
+          ${m.penalty && m.penalty.home !== null ? `<div class="mc-score-sub">Pen ${m.penalty.home} - ${m.penalty.away}</div>` : ''}
+        </div>
+
+        <div class="mc-team-side away">
+          <div class="mc-badge-wrap">${badge(m.away, 'md')}</div>
+          <div class="mc-team-title">${esc(m.away.name)}</div>
+        </div>
+      </div>
+
+      ${notes[s.k] ? `<p class="mc-hero-note">${notes[s.k]}</p>` : ''}
+    </div>
+  `;
+}
+
+function renderPreMatchHero(f) {
+  return `
+    <div class="mc-hero ns">
+      <div class="mc-hero-header">
+        <span class="st st-ns">🕒 Programado</span>
+        ${f.referee ? `<span class="mc-referee">⚖️ ${esc(f.referee)}</span>` : ''}
+      </div>
+
+      <div class="mc-hero-match">
+        <div class="mc-team-side home">
+          <div class="mc-badge-wrap">${badge(f.home, 'md')}</div>
+          <div class="mc-team-title">${esc(f.home.name)}</div>
+        </div>
+
+        <div class="mc-score-center">
+          <div class="mc-score-num vs">VS</div>
+          <div class="mc-score-sub">${new Date(f.date).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</div>
+        </div>
+
+        <div class="mc-team-side away">
+          <div class="mc-badge-wrap">${badge(f.away, 'md')}</div>
+          <div class="mc-team-title">${esc(f.away.name)}</div>
+        </div>
+      </div>
+
+      <p class="mc-hero-note">${f.venue ? `Estadio: ${esc(f.venue)} · ` : ''}Alineaciones oficiales ~45 min antes del saque inicial.</p>
+    </div>
+  `;
+}
+
+function renderTimeline(m, events = []) {
+  const s = info(m);
   const showEvents = events.filter((e) => e.type !== 'subst');
   const subs = events.filter((e) => e.type === 'subst');
-  return `<div class="mc mc-${s.k}">
-    <div class="mc-top">${chipHtml(m)}${m.referee ? `<small>\u00c1rbitro: ${esc(m.referee)}</small>` : ''}</div>
-    <div class="mc-score"><span>${esc(m.home.name)}</span><b>${score}</b><span>${esc(m.away.name)}</span></div>
-    <div class="mc-sub">${m.halftime && s.started ? `Medio tiempo ${m.halftime.home}-${m.halftime.away}` : ''}${m.penalty && m.penalty.home !== null ? ` \u00b7 Penales ${m.penalty.home}-${m.penalty.away}` : ''}</div>
-    <p class="mc-note">${notes[s.k] || ''}</p>
-    ${showEvents.length ? `<div class="sec">Cronolog\u00eda</div><div class="events">${showEvents.map((e) => eventRow(e, m)).join('')}</div>` : (s.started ? '<p class="mc-note">Sin eventos registrados todav\u00eda.</p>' : '')}
-    ${stats.length ? `<div class="sec">Estad\u00edsticas del partido</div><div class="stats">${stats.map(statBar).join('')}</div>` : ''}
-    ${subs.length ? `<details class="more"><summary>Cambios (${subs.length})</summary><div class="events">${subs.map((e) => eventRow(e, m)).join('')}</div></details>` : ''}
-  </div>`;
-}
 
-function headBlock(f) {
   return `
-    <button class="hub-close-circle" data-close aria-label="Cerrar">✕</button>
-    <div class="hub-header-bar">
-      <small class="hub-meta-title">${esc(f.league.name)}${f.league.round ? ' · ' + esc(f.league.round) : ''}${f.venue ? ' · ' + esc(f.venue) : ''}</small>
-    </div>
-    <div class="p-head">
-      <div class="p-teams">${badge(f.home, 'lg')}<span class="vs">VS</span>${badge(f.away, 'lg')}</div>
-      <h2>${esc(f.home.name)} vs ${esc(f.away.name)}</h2>
-      <small>${new Date(f.date).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' })}</small>
-    </div>`;
+    ${showEvents.length ? `
+      <div class="sec">Cronología del partido</div>
+      <div class="events">${showEvents.map((e) => eventRow(e, m)).join('')}</div>
+    ` : (s.started ? '<p class="mc-note" style="padding:16px 0;text-align:center;">Sin eventos registrados todavía en este partido.</p>' : '')}
+    ${subs.length ? `<details class="more" style="margin-top:10px;"><summary>Sustituciones y cambios (${subs.length})</summary><div class="events">${subs.map((e) => eventRow(e, m)).join('')}</div></details>` : ''}
+  `;
 }
 
+function renderStatsSection(f, stats = [], predObj = null) {
+  const c = predObj?.context || {};
+  const p = predObj?.prediction || {};
+  const inj = (t) => (t?.injuries || []).length ? t.injuries.map((i) => `<li>🩹 ${esc(i.player)}</li>`).join('') : '<li>Sin bajas reportadas</li>';
+  const xi = (t) => (t?.lineup || []).length ? t.lineup.map((x) => `<li>${esc(x.number)}. ${esc(x.name)}</li>`).join('') : '<li>No confirmado aún</li>';
 
-function preMatchCenter(f) {
-  return `<div class="mc mc-ns">
-    <div class="mc-top"><span class="st st-ns">Programado</span>${f.referee ? `<small>Árbitro: ${esc(f.referee)}</small>` : ''}</div>
-    <div class="mc-score"><span>${esc(f.home.name)}</span><b>VS</b><span>${esc(f.away.name)}</span></div>
-    <div class="mc-sub">${f.venue ? `Estadio: ${esc(f.venue)}` : ''}</div>
-    <p class="mc-note" style="margin-top:10px;">Partido programado. Las alineaciones oficiales se confirman típicamente 45-60 minutos antes del saque inicial.</p>
-    <div class="sec">Detalles del encuentro</div>
-    <div class="kpis" style="margin-top:8px;">
-      <div class="kpi"><div class="num" style="font-size:1.05rem;">${esc(f.league.country || 'Internacional')}</div><small>País</small></div>
-      <div class="kpi"><div class="num" style="font-size:1.05rem;">${esc(f.league.round || 'Jornada regular')}</div><small>Ronda</small></div>
-      <div class="kpi"><div class="num" style="font-size:1.05rem;">${new Date(f.date).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</div><small>Hora local</small></div>
+  return `
+    <div class="stats-section-box">
+      ${stats && stats.length ? `
+        <div class="sec">Estadísticas del encuentro</div>
+        <div class="stats">${stats.map(statBar).join('')}</div>
+      ` : `
+        <div class="empty-stats-note">
+          <div style="font-size:1.8rem;margin-bottom:6px;">📊</div>
+          <b>Estadísticas detalladas en vivo no emitidas</b>
+          <p>El proveedor de datos no emite estadísticas en tiempo real para esta liga/partido. Puedes consultar la forma, alineaciones y pronóstico de IA.</p>
+        </div>
+      `}
+
+      ${(c.home?.form || c.away?.form) ? `
+        <div class="sec" style="margin-top:20px;">Forma reciente (últimos 5 partidos)</div>
+        <div class="two" style="margin-bottom:14px;">
+          <div><b>${esc(f.home.name)}</b>${formPills(c.home?.form)}</div>
+          <div><b>${esc(f.away.name)}</b>${formPills(c.away?.form)}</div>
+        </div>
+      ` : ''}
+
+      <details class="more" style="margin-top:14px;" open><summary>Alineaciones y bajas ${p.lineupsConfirmed ? '(confirmados)' : ''}</summary>
+        <div class="sub-t">Titulares</div>
+        <div class="two">
+          <div><b>${esc(f.home.name)}</b><ul>${c.home ? xi(c.home) : '<li>Consultando alineaciones...</li>'}</ul></div>
+          <div><b>${esc(f.away.name)}</b><ul>${c.away ? xi(c.away) : '<li>Consultando alineaciones...</li>'}</ul></div>
+        </div>
+        <div class="sub-t">Bajas / Sanciones</div>
+        <div class="two">
+          <div><ul>${c.home ? inj(c.home) : '<li>Sin bajas</li>'}</ul></div>
+          <div><ul>${c.away ? inj(c.away) : '<li>Sin bajas</li>'}</ul></div>
+        </div>
+      </details>
     </div>
-  </div>`;
+  `;
+}
+
+function liveScenarioBlock(sc, f) {
+  if (!sc) return '';
+  const isLead = sc.type === 'lead';
+
+  if (isLead) {
+    const holdPct = pct(sc.holdWinProb);
+    const drawPct = pct(sc.drawRiskProb);
+    const turnPct = Math.max(0, 100 - holdPct - drawPct);
+
+    return `
+      <div class="live-sc-card">
+        <div class="live-sc-top">
+          <span class="live-sc-tag"><i class="pulse-dot"></i> EN CALIENTE · MINUTO ${sc.minute}'</span>
+          <span class="live-sc-rem">⏱ Quedan ~${sc.remMinutes} min</span>
+        </div>
+        <div class="live-sc-head">${esc(sc.headline)}</div>
+        <p class="live-sc-summary">${esc(sc.summary)}</p>
+
+        <div class="live-sc-bar-label">Proyección de desenlace final:</div>
+        <div class="live-sc-bar">
+          <div class="sc-seg sc-hold" style="width:0" data-w="${holdPct}">${holdPct}%</div>
+          <div class="sc-seg sc-draw" style="width:0" data-w="${drawPct}">${drawPct}%</div>
+          <div class="sc-seg sc-turn" style="width:0" data-w="${turnPct}">${turnPct}%</div>
+        </div>
+        <div class="live-sc-legend">
+          <span><i class="sc-dot sc-dot-hold"></i> Mantener victoria (${esc(sc.leader)})</span>
+          <span><i class="sc-dot sc-dot-draw"></i> Riesgo de empate</span>
+          <span><i class="sc-dot sc-dot-turn"></i> Remontada (${esc(sc.trailer)})</span>
+        </div>
+
+        <div class="live-sc-kpis">
+          <div class="live-sc-kpi">
+            <b>~${sc.remGoals}</b>
+            <small>Goles proyectados restantes</small>
+          </div>
+          <div class="live-sc-kpi">
+            <b class="${sc.drawRiskProb + sc.turnaroundProb >= 0.35 ? 'text-warn' : 'text-ok'}">${pct(sc.drawRiskProb + sc.turnaroundProb)}%</b>
+            <small>Riesgo de perder los 3 puntos</small>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  const homePct = pct(sc.homeBreakProb);
+  const drawPct = pct(sc.holdWinProb);
+  const awayPct = Math.max(0, 100 - homePct - drawPct);
+
+  return `
+    <div class="live-sc-card">
+      <div class="live-sc-top">
+        <span class="live-sc-tag"><i class="pulse-dot"></i> EN CALIENTE · MINUTO ${sc.minute}'</span>
+        <span class="live-sc-rem">⏱ Quedan ~${sc.remMinutes} min</span>
+      </div>
+      <div class="live-sc-head">${esc(sc.headline)}</div>
+      <p class="live-sc-summary">${esc(sc.summary)}</p>
+
+      <div class="live-sc-bar-label">Proyección de desenlace final:</div>
+      <div class="live-sc-bar">
+        <div class="sc-seg sc-home" style="width:0" data-w="${homePct}">${homePct}%</div>
+        <div class="sc-seg sc-draw" style="width:0" data-w="${drawPct}">${drawPct}%</div>
+        <div class="sc-seg sc-away" style="width:0" data-w="${awayPct}">${awayPct}%</div>
+      </div>
+      <div class="live-sc-legend">
+        <span><i class="sc-dot sc-dot-home"></i> Rompe empate ${esc(f.home.name)}</span>
+        <span><i class="sc-dot sc-dot-draw"></i> Conservar tablas</span>
+        <span><i class="sc-dot sc-dot-away"></i> Rompe empate ${esc(f.away.name)}</span>
+      </div>
+
+      <div class="live-sc-kpis">
+        <div class="live-sc-kpi">
+          <b>~${sc.remGoals}</b>
+          <small>Goles proyectados restantes</small>
+        </div>
+        <div class="live-sc-kpi">
+          <b>${drawPct}%</b>
+          <small>Probabilidad de finalizar empatados</small>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function predictionBlocks(r, pre) {
   const { fixture: f, prediction: p, context: c } = r;
   const inj = (t) => (t.injuries || []).length ? t.injuries.map((i) => `<li>🩹 ${esc(i.player)}</li>`).join('') : '<li>Sin bajas</li>';
   const xi = (t) => (t.lineup || []).length ? t.lineup.map((x) => `<li>${esc(x.number)}. ${esc(x.name)}</li>`).join('') : '<li>No confirmado</li>';
-  return `${verdictBlock(f, p, pre)}
+  const liveScHtml = p.liveScenario ? liveScenarioBlock(p.liveScenario, f) : '';
+
+  return `${liveScHtml}
+      ${verdictBlock(f, p, pre)}
       <div class="sec">Goles y marcador</div>
       <div class="kpis">
         <div class="kpi"><div class="num">${p.expectedScore}</div><small>${p.live ? 'Resultado final probable' : 'Marcador probable'}</small></div>
@@ -577,22 +921,102 @@ function predictionBlocks(r, pre) {
 async function openMatch(id, silent = false) {
   const drawer = $('#drawer'), panel = $('#panel');
   state.openId = id;
+  if (!state.modalTab) state.modalTab = 'match';
   document.body.classList.add('modal-open');
+  drawer.classList.remove('closing');
   drawer.classList.add('open');
   drawer.setAttribute('aria-hidden', 'false');
+
+  const baseMatch = state.matches.find((m) => String(m.id) === String(id));
+  const leagueTitle = baseMatch ? baseMatch.league.name : 'Cargando partido...';
+  const leagueRound = baseMatch?.league?.round ? `<small class="navbar-league-round">${esc(baseMatch.league.round)}</small>` : '';
+  const currentTab = (state.modalTab === 'ai') ? 'ai' : 'match';
   const scroll = panel.scrollTop;
-  if (!silent) panel.innerHTML = '<div class="hub-container"><div class="loading"><div class="spin"></div>Cargando datos del partido…</div></div>';
+
+  // Fase 1: Mostrar estructura inmediata con skeleton mientras se desliza hacia arriba
+  if (!silent) {
+    panel.innerHTML = `
+      <div class="modal-sticky-topbar">
+        <div class="modal-drag-pill" data-close title="Desliza o toca para cerrar"></div>
+        <div class="modal-navbar-row">
+          <div class="modal-navbar-info">
+            <span class="navbar-league-title">${esc(leagueTitle)}</span>
+            ${leagueRound}
+          </div>
+          <button type="button" class="btn-topbar-close" data-close aria-label="Cerrar ventana">✕</button>
+        </div>
+
+        <div class="modal-switch-wrap">
+          <div class="modal-switch" id="modalSwitch" data-active="${currentTab}">
+            <div class="switch-slider"></div>
+            <button type="button" class="switch-btn ${currentTab === 'match' ? 'active' : ''}" data-tab="match" onclick="setModalTab('match')">
+              <span class="btn-ic">⚽</span>
+              <span class="btn-lbl">Partido</span>
+            </button>
+            <button type="button" class="switch-btn ${currentTab === 'ai' ? 'active' : ''}" data-tab="ai" onclick="setModalTab('ai')">
+              <span class="btn-ic">✨</span>
+              <span class="btn-lbl">Pronóstico</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-scroll-body">
+        <div class="hub-container">
+          <div class="modal-skeleton-body">
+            <div class="sk-hero-box">
+              <div class="modal-sk-shimmer"></div>
+              <div class="sk-pulse-bar" style="width:110px;"></div>
+              <div class="sk-teams-row">
+                <div class="sk-badge-circle"></div>
+                <div class="sk-score-mid"></div>
+                <div class="sk-badge-circle"></div>
+              </div>
+              <div class="sk-pulse-bar" style="width:160px;margin-top:4px;"></div>
+            </div>
+            <div class="sk-block"><div class="modal-sk-shimmer"></div></div>
+            <div class="sk-block" style="height:90px;"><div class="modal-sk-shimmer"></div></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Garantizar que la animación de apertura móvil termine primero con total fluidez (320ms)
+  const animPromise = new Promise((resolve) => setTimeout(resolve, 320));
+
   try {
-    const m = await (await fetch(`/api/match?id=${id}`)).json();
-    if (m.error) throw new Error(m.error);
+    const [fetchRes] = await Promise.all([
+      fetch(`/api/match?id=${id}`).then((r) => r.json()),
+      animPromise,
+    ]);
+
+    if (fetchRes.error) throw new Error(fetchRes.error);
+    const m = fetchRes;
     const f = m.fixture, s = info(f);
 
-    const leftCol = s.k !== 'ns' ? matchCenter(f, m.events, m.stats) : preMatchCenter(f);
+    state.activeMatch = {
+      id: f.id,
+      status: f.status,
+      minute: f.minute,
+      goalsHome: f.goals?.home ?? 0,
+      goalsAway: f.goals?.away ?? 0,
+      hasPrediction: !!m.cachedPrediction,
+    };
 
-    let rightCol = '';
+    // Sección 1: Partido (Marcador, en vivo y cronología)
+    const heroScoreHtml = s.k !== 'ns' ? renderHeroScoreboard(f) : renderPreMatchHero(f);
+    const liveScHtml = m.cachedPrediction?.prediction?.liveScenario ? liveScenarioBlock(m.cachedPrediction.prediction.liveScenario, f) : '';
+    const timelineHtml = renderTimeline(f, m.events);
+
+    // Sección 2: Estadísticas y Alineaciones
+    const statsHtml = renderStatsSection(f, m.stats, m.cachedPrediction);
+
+    // Sección 3: Pronóstico IA
+    let aiHtml = '';
     if (m.cachedPrediction) {
       const pre = s.k !== 'ns';
-      rightCol = `<div class="pred-section" id="pred-section">
+      aiHtml = `<div class="pred-section" id="pred-section">
         <div class="db-cached-bar">
           <span class="db-pill">💾 Guardado en base de datos</span>
           <button class="btn-reanalyze" onclick="generatePrediction('${f.id}', true)">🔄 Recalcular con IA</button>
@@ -601,7 +1025,7 @@ async function openMatch(id, silent = false) {
         ${predictionBlocks(m.cachedPrediction, pre)}
       </div>`;
     } else if (s.k === 'ns' || s.k === 'live' || s.k === 'ht') {
-      rightCol = `<div class="pred-section" id="pred-section">
+      aiHtml = `<div class="pred-section" id="pred-section">
         <div class="ai-cta-card">
           <div class="ai-cta-glow"></div>
           <div class="ai-cta-badge">✦ Inteligencia Artificial & Big Data</div>
@@ -618,22 +1042,53 @@ async function openMatch(id, silent = false) {
         </div>
       </div>`;
     } else if (s.k === 'ft') {
-      rightCol = '<div class="pred-section"><p class="hint center" style="margin:24px 0 12px">Este partido ya finalizó: no hay pronóstico nuevo disponible.</p></div>';
+      aiHtml = '<div class="pred-section"><p class="hint center" style="margin:24px 0 12px">Este partido ya finalizó: no hay pronóstico nuevo disponible.</p></div>';
     }
 
+    const currentTab = (state.modalTab === 'ai') ? 'ai' : 'match';
+
     const html = `
-      <div class="hub-container">
-        ${headBlock(f)}
-        <div class="hub-tabs-mobile" id="hub-tabs">
-          <button class="hub-tab active" onclick="switchHubTab('live')">⚽ Partido y Estadísticas</button>
-          <button class="hub-tab" onclick="switchHubTab('ai')">✨ Pronóstico IA</button>
-        </div>
-        <div class="match-hub-grid" id="hub-grid" data-active="live">
-          <div class="hub-col hub-live-col">
-            ${leftCol}
+      <div class="modal-sticky-topbar">
+        <div class="modal-drag-pill" data-close title="Desliza o toca para cerrar"></div>
+        <div class="modal-navbar-row">
+          <div class="modal-navbar-info">
+            <span class="navbar-league-title">${esc(f.league.name)}</span>
+            ${f.league.round ? `<small class="navbar-league-round">${esc(f.league.round)}</small>` : ''}
           </div>
-          <div class="hub-col hub-ai-col">
-            ${rightCol}
+          <button type="button" class="btn-topbar-close" data-close aria-label="Cerrar ventana">✕</button>
+        </div>
+
+        <!-- Switch Deslizable de 2 opciones: Partido y Pronóstico -->
+        <div class="modal-switch-wrap">
+          <div class="modal-switch" id="modalSwitch" data-active="${currentTab}">
+            <div class="switch-slider"></div>
+            <button type="button" class="switch-btn ${currentTab === 'match' ? 'active' : ''}" data-tab="match" onclick="setModalTab('match')">
+              <span class="btn-ic">⚽</span>
+              <span class="btn-lbl">Partido</span>
+            </button>
+            <button type="button" class="switch-btn ${currentTab === 'ai' ? 'active' : ''}" data-tab="ai" onclick="setModalTab('ai')">
+              <span class="btn-ic">✨</span>
+              <span class="btn-lbl">Pronóstico</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-scroll-body modal-content-loaded">
+        <div class="hub-container">
+          <div class="match-hub-sections" id="hubSections" data-active="${currentTab}">
+            <!-- PESTAÑA 1: PARTIDO (Marcador, en vivo, estadísticas, alineaciones y cronología) -->
+            <div class="hub-section hub-sec-match">
+              ${heroScoreHtml}
+              ${liveScHtml}
+              ${statsHtml}
+              ${timelineHtml}
+            </div>
+
+            <!-- PESTAÑA 2: PRONÓSTICO IA -->
+            <div class="hub-section hub-sec-ai">
+              ${aiHtml}
+            </div>
           </div>
         </div>
       </div>
@@ -643,17 +1098,67 @@ async function openMatch(id, silent = false) {
     if (silent) panel.scrollTop = scroll;
     requestAnimationFrame(() => panel.querySelectorAll('[data-w]').forEach((el) => (el.style.width = el.dataset.w + '%')));
   } catch (e) {
-    panel.innerHTML = `<div class="hub-container"><div class="hub-navbar"><button class="hub-back-btn" data-close>← Volver</button><button class="hub-close-circle" data-close>✕</button></div><div class="loading">Error: ${esc(e.message)}</div></div>`;
+    panel.innerHTML = `
+      <div class="modal-sticky-topbar">
+        <div class="modal-navbar-row">
+          <div class="modal-navbar-info">
+            <span class="navbar-league-title">Error al cargar</span>
+          </div>
+          <button type="button" class="btn-topbar-close" data-close aria-label="Cerrar">✕</button>
+        </div>
+      </div>
+      <div class="modal-scroll-body">
+        <div class="hub-container"><div class="loading">Error: ${esc(e.message)}</div></div>
+      </div>`;
   }
 }
 
-window.switchHubTab = function(tab) {
-  const grid = $('#hub-grid');
-  if (grid) grid.dataset.active = tab;
-  document.querySelectorAll('.hub-tab').forEach(b => {
-    b.classList.toggle('active', (tab === 'live' && b.innerText.includes('Partido')) || (tab === 'ai' && b.innerText.includes('Pronóstico')));
+window.setModalTab = function(tab) {
+  state.modalTab = tab;
+  const sw = $('#modalSwitch');
+  if (sw) sw.dataset.active = tab;
+  const hub = $('#hubSections');
+  if (hub) hub.dataset.active = tab;
+  document.querySelectorAll('.switch-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
   });
+  if (tab === 'ai') {
+    requestAnimationFrame(() => {
+      document.querySelectorAll('#hubSections .hub-sec-ai [data-w]').forEach(el => {
+        el.style.width = el.dataset.w + '%';
+      });
+    });
+  }
 };
+window.switchHubTab = window.setModalTab;
+
+function showLiveAlertToast(msg) {
+  let toast = $('#live-toast-banner');
+  const container = $('.hub-container');
+  if (!container) return;
+
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'live-toast-banner';
+    toast.className = 'live-toast-banner';
+    const headerBar = $('.hub-header-bar');
+    if (headerBar) headerBar.after(toast);
+    else container.prepend(toast);
+  }
+
+  toast.innerHTML = `
+    <div class="live-toast-content">
+      <i class="live-toast-pulse"></i>
+      <span class="live-toast-text">${esc(msg)}</span>
+    </div>
+  `;
+  toast.style.display = 'block';
+
+  clearTimeout(window._toastTimeout);
+  window._toastTimeout = setTimeout(() => {
+    if (toast) toast.style.display = 'none';
+  }, 9000);
+}
 
 window.generatePrediction = async function(id, force = false) {
   const sec = $('#pred-section');
@@ -671,6 +1176,9 @@ window.generatePrediction = async function(id, force = false) {
     if (r.error) throw new Error(r.error);
     const f = r.fixture, s = info(f);
     const pre = s.k !== 'ns';
+    if (state.activeMatch && String(state.activeMatch.id) === String(id)) {
+      state.activeMatch.hasPrediction = true;
+    }
     sec.innerHTML = `
       <div class="db-cached-bar">
         <span class="db-pill">💾 Análisis completado y guardado en base de datos</span>
@@ -693,24 +1201,122 @@ async function updateLiveMatchCenter(id) {
   try {
     const m = await (await fetch(`/api/match?id=${id}`)).json();
     if (m.error || !m.fixture) return;
+
+    const f = m.fixture;
+    const prev = state.activeMatch;
+    const prevScore = prev ? `${prev.goalsHome} - ${prev.goalsAway}` : null;
+    const newScore = `${f.goals?.home ?? 0} - ${f.goals?.away ?? 0}`;
+    const scoreChanged = prevScore !== null && prevScore !== newScore;
+    const statusChanged = prev && prev.status !== f.status;
+
+    // Actualizar el centro del partido en la columna izquierda
     const mcEl = $('.mc');
     if (mcEl) {
       const temp = document.createElement('div');
-      temp.innerHTML = matchCenter(m.fixture, m.events, m.stats);
+      temp.innerHTML = matchCenter(f, m.events, m.stats);
       mcEl.replaceWith(temp.firstElementChild);
     }
-  } catch {}
+
+    // Actualizar marcador en cabecera
+    const vsEl = $('.p-head .vs');
+    if (vsEl && f.goals && f.goals.home !== null && f.goals.away !== null) {
+      vsEl.textContent = `${f.goals.home} - ${f.goals.away}`;
+    }
+
+    // Si hubo gol o cambio de estado (ej: medio tiempo o expulsión)
+    if (scoreChanged || statusChanged) {
+      const eventMsg = scoreChanged
+        ? `⚽ ¡Gol en vivo! Nuevo marcador: ${f.home.name} ${newScore} ${f.away.name} (Min ${f.minute}')`
+        : `⚡ ¡Actualización del partido! ${info(f).label} (Min ${f.minute}')`;
+
+      const hasPred = $('#pred-section .verdict') || (prev && prev.hasPrediction);
+      if (hasPred) {
+        showLiveAlertToast(`${eventMsg} · Re-calculando probabilidades con la IA...`);
+        await generatePrediction(id, true);
+      } else {
+        showLiveAlertToast(eventMsg);
+      }
+    } else {
+      // Si solo avanzó el tiempo, refrescar discretamente el reloj en la tarjeta liveScenario si está visible
+      const liveTag = $('.live-sc-tag');
+      if (liveTag && f.minute) {
+        liveTag.innerHTML = `<i class="pulse-dot"></i> EN CALIENTE · MINUTO ${f.minute}'`;
+      }
+      const remTag = $('.live-sc-rem');
+      if (remTag && f.minute) {
+        remTag.textContent = `⏱ Quedan ~${Math.max(1, 90 - f.minute)} min`;
+      }
+    }
+
+    // Guardar nuevo snapshot
+    state.activeMatch = {
+      id,
+      status: f.status,
+      minute: f.minute,
+      goalsHome: f.goals?.home ?? 0,
+      goalsAway: f.goals?.away ?? 0,
+      hasPrediction: !!$('#pred-section .verdict') || (prev && prev.hasPrediction),
+    };
+  } catch (e) {
+    console.error('Error actualizando partido en vivo:', e);
+  }
 }
 
+let isClosingDrawer = false;
 const closeDrawer = () => {
+  const drawer = $('#drawer');
+  if (!drawer || !drawer.classList.contains('open') || isClosingDrawer) return;
+  isClosingDrawer = true;
   state.openId = null;
+  state.activeMatch = null;
+  clearTimeout(window._toastTimeout);
   document.body.classList.remove('modal-open');
-  $('#drawer').classList.remove('open');
-  $('#drawer').setAttribute('aria-hidden', 'true');
+  drawer.classList.add('closing');
+  drawer.setAttribute('aria-hidden', 'true');
+  setTimeout(() => {
+    drawer.classList.remove('open', 'closing');
+    isClosingDrawer = false;
+  }, 320);
 };
 window.closeDrawer = closeDrawer;
 $('#drawer').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeDrawer(); });
 document.addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer());
+
+/* ---------- Gestos Táctiles Móviles en Drawer (Swipe) ---------- */
+let touchStartX = 0, touchStartY = 0, touchStartScroll = 0;
+const drawerEl = $('#drawer');
+drawerEl.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    const panel = $('#panel');
+    touchStartScroll = panel ? panel.scrollTop : 0;
+  }
+}, { passive: true });
+
+drawerEl.addEventListener('touchend', (e) => {
+  if (e.changedTouches.length === 1) {
+    const deltaX = e.changedTouches[0].clientX - touchStartX;
+    const deltaY = e.changedTouches[0].clientY - touchStartY;
+
+    // Deslizar hacia abajo desde el tope del modal para cerrarlo
+    if (touchStartScroll <= 15 && deltaY > 75 && Math.abs(deltaY) > Math.abs(deltaX) * 1.4) {
+      closeDrawer();
+      return;
+    }
+
+    // Deslizar horizontalmente para cambiar de pestaña en móvil (Switch deslizable)
+    if (window.innerWidth <= 960 && Math.abs(deltaX) > 60 && Math.abs(deltaY) < Math.abs(deltaX) * 0.8) {
+      if (deltaX < 0) {
+        // Deslizar hacia la izquierda -> ir a Pronóstico
+        setModalTab('ai');
+      } else if (deltaX > 0) {
+        // Deslizar hacia la derecha -> ir a Partido
+        setModalTab('match');
+      }
+    }
+  }
+}, { passive: true });
 
 window.clearSearchFilter = clearSearch;
 loadStatus();

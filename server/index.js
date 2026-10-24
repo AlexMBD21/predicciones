@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { predict, templateExplanation } from './predictor.js';
 import { explain } from './gemini.js';
 import { parseDate, parseId, cleanFixtures, cleanContext, validatePrediction, ValidationError } from './validate.js';
-import { getCachedPrediction, savePrediction } from './db.js';
+import { getCachedPrediction, savePrediction, getPredictionsForFixtures, isSupabaseConnected } from './db.js';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +47,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 429, { error: 'Demasiadas peticiones. Espera un minuto.' });
     }
     if (url.pathname === '/api/status') {
-      return send(res, 200, { provider: provider.name, gemini: !!process.env.GEMINI_API_KEY });
+      return send(res, 200, { provider: provider.name, gemini: !!process.env.GEMINI_API_KEY, supabase: isSupabaseConnected() });
     }
     if (url.pathname === '/api/matches') {
       const date = parseDate(url.searchParams.get('date'));
@@ -84,6 +84,10 @@ const server = http.createServer(async (req, res) => {
           }
           fixturesById.set(String(f.id), f);
         });
+        const predMap = await getPredictionsForFixtures(fixtures.map((f) => f.id));
+        fixtures.forEach((f) => {
+          f.prediction = predMap[String(f.id)] || null;
+        });
         return send(res, 200, { date, matches: fixtures, dropped });
       } catch (err) {
         if (/limit|cuota|peticiones/i.test(err.message)) {
@@ -104,7 +108,7 @@ const server = http.createServer(async (req, res) => {
       if (fx.status !== 'NS' && fx.status !== 'TBD') {
         try { detail = await provider.getLive(fx); } catch (e) { console.error('getLive', e.message); }
       }
-      const cachedPrediction = getCachedPrediction(id, fx.status);
+      const cachedPrediction = await getCachedPrediction(id, fx.status);
       return send(res, 200, { fixture: fx, events: detail.events, stats: detail.stats, cachedPrediction });
     }
     if (url.pathname === '/api/predict') {
@@ -113,7 +117,7 @@ const server = http.createServer(async (req, res) => {
       if (!fx) return send(res, 404, { error: 'Partido no encontrado. Recarga la lista.' });
 
       const force = url.searchParams.get('force') === '1';
-      const cached = getCachedPrediction(id, fx.status);
+      const cached = await getCachedPrediction(id, fx.status);
 
       // Si ya está en caché y no se pide forzar recálculo, responder inmediatamente sin gastar API
       if (!force && cached) {
@@ -152,8 +156,8 @@ const server = http.createServer(async (req, res) => {
         analysis: ai || templateExplanation(ctx, prediction),
         analysisSource: ai ? 'gemini' : 'modelo',
       };
-      // Guardar en SQLite para futuras consultas
-      savePrediction(id, fx.date, fx.status, payload);
+      // Guardar en SQLite y sincronizar en Supabase
+      await savePrediction(id, fx.date, fx.status, payload);
       return send(res, 200, payload);
     }
     // Archivos estáticos
@@ -173,4 +177,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(` Pronósticos en http://localhost:${PORT}  [${provider.name}]`));
+server.listen(PORT, () => {
+  const supa = isSupabaseConnected() ? ' + Supabase ☁️' : '';
+  console.log(`⚽ Pronósticos en http://localhost:${PORT} [${provider.name}${supa}]`);
+});

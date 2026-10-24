@@ -25,3 +25,8 @@ Thumbs.db
 # Archivos de prueba / scratch
 scratch*
 *.tmp
+
+# Bases de datos locales
+*.sqlite
+*.sqlite-*
+data.sqlite*

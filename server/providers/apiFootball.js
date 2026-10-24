@@ -1,5 +1,5 @@
 // Proveedor API-Football (api-sports.io) - plan gratuito: 100 peticiones/día.
-// Protección de cuota agresiva con caché persistente en disco (SQLite).
+// Protección de cuota agresiva con caché persistente en la nube (Supabase).
 
 import { getApiCache, saveApiCache } from '../db.js';
 
@@ -11,11 +11,11 @@ async function api(path, ttlMs) {
   const hit = cache.get(path);
   if (hit && Date.now() - hit.t < ttlMs) return hit.data;
 
-  // 2. Disco persistente SQLite (sobrevive reinicios de Node)
-  const diskHit = getApiCache(path, ttlMs);
-  if (diskHit) {
-    cache.set(path, { t: Date.now(), data: diskHit });
-    return diskHit;
+  // 2. Caché persistente en la nube (Supabase)
+  const cloudHit = await getApiCache(path, ttlMs);
+  if (cloudHit) {
+    cache.set(path, { t: Date.now(), data: cloudHit });
+    return cloudHit;
   }
 
   let lastErr;
@@ -32,9 +32,9 @@ async function api(path, ttlMs) {
       if (errs && errs.length) throw Object.assign(new Error('API-Football: ' + errs.join(' | ')), { fatal: true, isLimit: /limit|request/i.test(errs.join(' ')) });
       if (!json || (!Array.isArray(json.response) && typeof json.response !== 'object')) throw new Error('Respuesta con formato inesperado');
       
-      // Guardar en memoria y en disco local
+      // Guardar en memoria y en la nube (Supabase)
       cache.set(path, { t: Date.now(), data: json.response });
-      saveApiCache(path, json.response);
+      await saveApiCache(path, json.response);
       return json.response;
     } catch (e) {
       lastErr = e;
@@ -43,10 +43,10 @@ async function api(path, ttlMs) {
     }
   }
 
-  // 3. Si falló por límite de cuota o error de red, usar respaldo histórico de SQLite
-  const fallback = getApiCache(path, null);
+  // 3. Si falló por límite de cuota o error de red, usar respaldo histórico de Supabase
+  const fallback = await getApiCache(path, null);
   if (fallback) {
-    console.warn(`[Modo Protección] Cuota alcanzada. Usando respaldo en SQLite para: ${path}`);
+    console.warn(`[Modo Protección] Cuota alcanzada. Usando respaldo en Supabase para: ${path}`);
     cache.set(path, { t: Date.now(), data: fallback });
     return fallback;
   }
@@ -188,5 +188,61 @@ export async function getContext(fx) {
       homeIsCurrentHome: m.teams.home.id === fx.home.id,
     }));
 
-  return { home, away, h2h, venue: fx.venue, league: { avgHome: 1.45, avgAway: 1.15 } };
+  const leagueProfile = getLeagueProfile(fx.league);
+
+  return {
+    home,
+    away,
+    h2h,
+    venue: fx.venue,
+    league: {
+      ...leagueProfile,
+      name: fx.league?.name,
+      country: fx.league?.country,
+    },
+  };
+}
+
+// Medias de goles y ventaja de local calibradas por país/torneo
+const LEAGUE_BENCHMARKS = {
+  // Ligas muy ofensivas (> 3.0 goles/partido)
+  Germany: { avgHome: 1.76, avgAway: 1.42, rho: -0.06 },
+  Netherlands: { avgHome: 1.78, avgAway: 1.45, rho: -0.06 },
+  Norway: { avgHome: 1.72, avgAway: 1.38, rho: -0.06 },
+  England: { avgHome: 1.66, avgAway: 1.36, rho: -0.07 },
+  USA: { avgHome: 1.62, avgAway: 1.28, rho: -0.07 },
+
+  // Ligas estándar europeas (~2.6 - 2.8 goles/partido)
+  Spain: { avgHome: 1.45, avgAway: 1.12, rho: -0.08 },
+  Italy: { avgHome: 1.48, avgAway: 1.18, rho: -0.08 },
+  France: { avgHome: 1.50, avgAway: 1.20, rho: -0.08 },
+  Portugal: { avgHome: 1.44, avgAway: 1.14, rho: -0.08 },
+
+  // Ligas sudamericanas / defensivas / físicas (alta tasa de empates y Under 2.5)
+  Colombia: { avgHome: 1.32, avgAway: 0.88, rho: -0.11 },
+  Argentina: { avgHome: 1.28, avgAway: 0.90, rho: -0.11 },
+  Brazil: { avgHome: 1.44, avgAway: 1.02, rho: -0.09 },
+  Chile: { avgHome: 1.38, avgAway: 1.05, rho: -0.09 },
+  Peru: { avgHome: 1.40, avgAway: 0.95, rho: -0.10 },
+  Mexico: { avgHome: 1.52, avgAway: 1.18, rho: -0.08 },
+
+  // Torneos internacionales / continentales
+  World: { avgHome: 1.55, avgAway: 1.25, rho: -0.08 },
+};
+
+function getLeagueProfile(league) {
+  if (!league) return { avgHome: 1.45, avgAway: 1.15, rho: -0.08 };
+  if (league.country && LEAGUE_BENCHMARKS[league.country]) {
+    return LEAGUE_BENCHMARKS[league.country];
+  }
+  const name = (league.name || '').toLowerCase();
+  if (name.includes('premier league')) return LEAGUE_BENCHMARKS.England;
+  if (name.includes('la liga') || name.includes('primera división') || name.includes('laliga')) return LEAGUE_BENCHMARKS.Spain;
+  if (name.includes('serie a')) return LEAGUE_BENCHMARKS.Italy;
+  if (name.includes('bundesliga')) return LEAGUE_BENCHMARKS.Germany;
+  if (name.includes('champions league')) return { avgHome: 1.62, avgAway: 1.35, rho: -0.07 };
+  if (name.includes('libertadores') || name.includes('sudamericana')) return { avgHome: 1.50, avgAway: 0.95, rho: -0.10 };
+  if (name.includes('betplay') || name.includes('colombia')) return LEAGUE_BENCHMARKS.Colombia;
+
+  return { avgHome: 1.45, avgAway: 1.15, rho: -0.08 };
 }

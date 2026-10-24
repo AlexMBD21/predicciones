@@ -8,10 +8,21 @@ const poisson = (k, l) => (Math.exp(-l) * Math.pow(l, k)) / fact(k);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 function formPoints(form = '') {
-  const last = form.slice(-5).split('');
+  const clean = form.replace(/[^WDL]/g, '');
+  const last = clean.slice(-5).split('');
   if (!last.length) return null;
-  const pts = last.reduce((s, c) => s + (c === 'W' ? 3 : c === 'D' ? 1 : 0), 0);
-  return pts / (last.length * 3); // 0..1
+  // Ponderación exponencial de recencia: el partido más reciente (último) tiene 2.8x más peso que el de hace 5 partidos
+  const weights = [1.0, 1.3, 1.7, 2.2, 2.8].slice(5 - last.length);
+  let totalW = 0;
+  let earnedW = 0;
+  for (let idx = 0; idx < last.length; idx++) {
+    const w = weights[idx];
+    const c = last[idx];
+    const pts = c === 'W' ? 3 : c === 'D' ? 1 : 0;
+    earnedW += (pts / 3) * w;
+    totalW += w;
+  }
+  return totalW > 0 ? earnedW / totalW : null; // 0..1
 }
 
 // Contrae la estadística hacia la media de la liga si hay pocos partidos
@@ -133,10 +144,10 @@ export function predict(ctx) {
 
   // En vivo: solo quedan goles por jugarse; se suman al marcador actual
   const live = ctx.live || null;
-  let cH = 0, cA = 0, progress = 0;
+  let cH = 0, cA = 0, progress = 0, minute = 0;
   if (live) {
     cH = live.home || 0; cA = live.away || 0;
-    const minute = clamp(live.minute ?? 0, 0, 90);
+    minute = clamp(live.minute ?? 0, 0, 90);
     progress = minute / 90;
     const rf = Math.max(0.03, (90 - minute) / 90);
     // Con roja, el equipo ataca menos y el rival más
@@ -155,7 +166,7 @@ export function predict(ctx) {
   }
 
   // Matriz de marcadores (goles restantes si es en vivo)
-  const rho = live ? 0 : -0.08;
+  const rho = live ? 0 : (league.rho ?? -0.08);
   const matrix = [];
   let total = 0;
   for (let i = 0; i <= MAX_GOALS; i++) {
@@ -200,7 +211,7 @@ export function predict(ctx) {
   const pickLabel = pick === 'home' ? home.name : pick === 'away' ? away.name : 'Empate';
   const dc = pick === 'home' ? '1X' : pick === 'away' ? 'X2' : 'X';
 
-  // Mejor apuesta recomendada
+  // Mejor apuesta recomendada según criterios cuantitativos estrictos
   const mk = (type, label, p, group) => ({ type, label, p: +p.toFixed(4), fairOdds: +(1 / p).toFixed(2), group });
   const markets1 = [
     mk('1', `Victoria de ${home.name} (1)`, pH, 'result'),
@@ -215,34 +226,134 @@ export function predict(ctx) {
     mk('BTTS', 'Ambos equipos marcan', btts, 'goals'),
     mk('NBTTS', 'Ambos NO marcan', 1 - btts, 'goals'),
   ];
-  const best = (group, min) =>
-    markets1.filter((m) => m.group === group && m.p >= min && m.p < 0.985).sort((a, b) => b.p - a.p)[0];
-  let primary = best('result', 0.5);
-  let reason = 'Resultado directo con probabilidad alta: mejor relación entre riesgo y cuota.';
-  if (!primary) {
-    primary = best('double', 0.72);
-    reason = 'Ningún resultado único es claro; la doble oportunidad reduce el riesgo.';
+
+  // 1) Ganador Directo (1 o 2): solo si tiene probabilidad sólida (>= 52%) Y margen >= 15% sobre el rival/empate
+  let primary = null;
+  let reason = '';
+  const topDirect = (pick === 'home' || pick === 'away')
+    ? markets1.find((m) => m.type === (pick === 'home' ? '1' : '2'))
+    : null;
+
+  if (topDirect && topDirect.p >= 0.52 && margin >= 0.15) {
+    primary = topDirect;
+    reason = `Ventaja neta sólida (${(topDirect.p * 100).toFixed(0)}% de probabilidad con margen de +${(margin * 100).toFixed(0)}%): mejor relación entre cuota y probabilidad estadística.`;
   }
+
+  // 2) Si el resultado directo es riesgoso, buscar Doble Oportunidad con cobertura alta (>= 70%)
   if (!primary) {
-    primary = best('goals', 0.62);
-    reason = 'El resultado está parejo; el mercado de goles ofrece más seguridad.';
+    const dcPick = pick === 'home' ? '1X' : pick === 'away' ? 'X2' : null;
+    const dcCandidate = dcPick ? markets1.find((m) => m.type === dcPick) : null;
+    if (dcCandidate && dcCandidate.p >= 0.70) {
+      primary = dcCandidate;
+      reason = 'El resultado directo presenta riesgo de empate; la doble oportunidad cubre 2 de los 3 desenlaces con alta consistencia estadística.';
+    }
   }
-  const noClearBet = !primary;
-  if (noClearBet) {
+
+  // 3) Si el 1X2 está parejo o trabado, evaluar mercados de goles con alta consistencia
+  if (!primary) {
+    // Preferir Under 2.5 si la liga o partido es cerrado, o Over 1.5 si es dinámico
+    const u25 = markets1.find((m) => m.type === 'U2.5');
+    const o15 = markets1.find((m) => m.type === 'O1.5');
+    const o25 = markets1.find((m) => m.type === 'O2.5');
+
+    if (u25 && u25.p >= 0.60) {
+      primary = u25;
+      reason = 'Partido cerrado y disputado; el mercado de menos de 2.5 goles ofrece mayor seguridad que elegir un ganador directo.';
+    } else if (o15 && o15.p >= 0.74) {
+      primary = o15;
+      reason = 'Tendencia ofensiva favorable; la línea de más de 1.5 goles reduce la varianza del 1X2.';
+    } else if (o25 && o25.p >= 0.62) {
+      primary = o25;
+      reason = 'Expectativa de goles alta; el mercado de más de 2.5 goles aprovecha la debilidad defensiva proyectada.';
+    }
+  }
+
+  // 4) Si ningún mercado supera el umbral de seguridad: ALERTA DE NO APOSTAR (No Bet)
+  let noClearBet = false;
+  if (!primary) {
+    noClearBet = true;
     primary = markets1.filter((m) => m.group === 'double').sort((a, b) => b.p - a.p)[0];
-    reason = 'Partido muy parejo y sin ventaja clara. Lo más prudente es no apostar; si lo haces, esta es la opción menos arriesgada.';
+    reason = 'Partido de alta varianza estadística sin ventaja clara. Criterio profesional: abstenerse o esperar lectura en vivo.';
   }
+
   const alternatives = markets1
-    .filter((m) => m.type !== primary.type && m.p >= 0.55 && m.p < 0.985)
+    .filter((m) => m.type !== primary.type && m.p >= 0.58 && m.p < 0.985)
     .sort((a, b) => b.p - a.p)
     .slice(0, 3);
+
   const bestBet = {
     ...primary,
     reason,
     noClearBet,
-    risk: primary.p >= 0.7 ? 'Bajo' : primary.p >= 0.55 ? 'Medio' : 'Alto',
+    risk: noClearBet ? 'Alto' : primary.p >= 0.72 ? 'Bajo' : primary.p >= 0.58 ? 'Medio' : 'Alto',
     alternatives,
   };
+
+  let liveScenario = null;
+  if (live) {
+    const remMinutes = Math.max(1, Math.round(90 - minute));
+    const remGoals = +(lh + la).toFixed(1);
+
+    if (cH > cA) {
+      liveScenario = {
+        type: 'lead',
+        leader: home.name,
+        leaderKey: 'home',
+        trailer: away.name,
+        trailerKey: 'away',
+        diff: cH - cA,
+        currentScore: `${cH} - ${cA}`,
+        minute,
+        remMinutes,
+        remGoals,
+        holdWinProb: +pH.toFixed(4),
+        drawRiskProb: +pD.toFixed(4),
+        turnaroundProb: +pA.toFixed(4),
+        headline: `${home.name} con ventaja (${cH}-${cA})`,
+        summary: pH >= 0.70
+          ? `Ventaja sólida: ${(pH * 100).toFixed(0)}% de probabilidad de conservar la victoria.`
+          : `Ventaja bajo presión: ${(pD * 100).toFixed(0)}% de riesgo de empate y ${(pA * 100).toFixed(0)}% de remontada rival.`
+      };
+    } else if (cA > cH) {
+      liveScenario = {
+        type: 'lead',
+        leader: away.name,
+        leaderKey: 'away',
+        trailer: home.name,
+        trailerKey: 'home',
+        diff: cA - cH,
+        currentScore: `${cH} - ${cA}`,
+        minute,
+        remMinutes,
+        remGoals,
+        holdWinProb: +pA.toFixed(4),
+        drawRiskProb: +pD.toFixed(4),
+        turnaroundProb: +pH.toFixed(4),
+        headline: `${away.name} con ventaja (${cH}-${cA})`,
+        summary: pA >= 0.70
+          ? `Ventaja visitante sólida: ${(pA * 100).toFixed(0)}% de probabilidad de asegurar los 3 puntos.`
+          : `Ventaja frágil: ${(pD * 100).toFixed(0)}% de riesgo de empate y ${(pH * 100).toFixed(0)}% de remontada local.`
+      };
+    } else {
+      liveScenario = {
+        type: 'tied',
+        leader: null,
+        trailer: null,
+        diff: 0,
+        currentScore: `${cH} - ${cA}`,
+        minute,
+        remMinutes,
+        remGoals,
+        holdWinProb: +pD.toFixed(4),
+        homeBreakProb: +pH.toFixed(4),
+        awayBreakProb: +pA.toFixed(4),
+        headline: `Partido igualado (${cH}-${cA})`,
+        summary: pD >= 0.42
+          ? `Fuerte tendencia a tablas: ${(pD * 100).toFixed(0)}% de probabilidad de que termine en empate.`
+          : `${pH > pA ? home.name : away.name} parte con mayor empuje (${Math.round(Math.max(pH, pA) * 100)}%) para quebrar la paridad.`
+      };
+    }
+  }
 
   return {
     lambda: { home: +lh.toFixed(2), away: +la.toFixed(2) },
@@ -262,6 +373,7 @@ export function predict(ctx) {
     },
     pick: { outcome: pick, label: pickLabel, doubleChance: dc },
     live: !!live,
+    liveScenario,
     bestBet,
     topScores: scores.slice(0, 5).map((s) => ({ score: s.score, p: +s.p.toFixed(4) })),
     expectedScore: scores[0].score,

@@ -153,8 +153,9 @@ export function cleanContext(raw) {
   if (h2h.length < 2) issues.push({ level: 'info', msg: 'Historial directo insuficiente (<2 cruces).' });
 
   const league = {
-    avgHome: clamp(num(raw.league?.avgHome) ?? 1.45, 0.8, 2.2),
-    avgAway: clamp(num(raw.league?.avgAway) ?? 1.15, 0.6, 1.8),
+    avgHome: clamp(num(raw.league?.avgHome) ?? 1.45, 0.8, 2.5),
+    avgAway: clamp(num(raw.league?.avgAway) ?? 1.15, 0.5, 2.2),
+    rho: clamp(num(raw.league?.rho) ?? -0.08, -0.20, 0.0),
   };
   const venue = text(raw.venue, 120) || null;
   if (!venue) issues.push({ level: 'info', msg: 'Estadio no informado.' });

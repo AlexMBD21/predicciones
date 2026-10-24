@@ -2,16 +2,19 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#070b17" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="format-detection" content="telephone=no" />
   <title>PronoXI · Pronósticos de fútbol con IA</title>
   <meta name="description" content="Pronósticos de fútbol con IA: probabilidades 1X2, goles esperados, forma, bajas, alineaciones y localía en tiempo real." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/live.css" />
+  <link rel="stylesheet" href="/styles.css?v=15" />
+  <link rel="stylesheet" href="/live.css?v=15" />
 </head>
 <body>
-  <div class="bg-orb orb-1"></div><div class="bg-orb orb-2"></div>
   <header class="topbar">
     <div class="brand"><span class="logo">⚽</span><span>Prono<b>XI</b></span></div>
     <div class="search-wrap" id="searchWrap">
@@ -24,7 +27,6 @@
         <button type="button" id="clearSearch" class="search-clear" aria-label="Limpiar búsqueda" title="Limpiar" style="display:none;">✕</button>
         <kbd class="search-kbd" title="Presiona '/' para buscar">/</kbd>
       </div>
-      <div id="searchDropdown" class="search-dropdown" style="display:none;" role="listbox"></div>
     </div>
     <div id="status" class="status-pill">Conectando…</div>
   </header>
@@ -44,6 +46,6 @@
     <div class="drawer-backdrop" data-close></div>
     <aside class="drawer-panel" id="panel"></aside>
   </div>
-  <script src="/app.js" type="module"></script>
+  <script src="/app.js?v=15" type="module"></script>
 </body>
 </html>
