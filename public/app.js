@@ -233,6 +233,33 @@ async function loadStatus() {
   } catch {}
 }
 
+function renderDates() {
+  const wrap = $('#dates');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  let activeBtn = null;
+  for (let i = -2; i <= 5; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const dateStr = localIso(d);
+    const b = document.createElement('button');
+    const isActive = dateStr === state.date;
+    b.className = 'date-btn' + (isActive ? ' active' : '');
+    b.innerHTML = `<small>${i === 0 ? 'Hoy' : d.toLocaleDateString('es', { weekday: 'short' })}</small><strong>${d.getDate()}</strong>`;
+    b.onclick = () => {
+      state.date = dateStr;
+      persistState();
+      renderDates();
+      loadMatches();
+    };
+    wrap.appendChild(b);
+    if (isActive) activeBtn = b;
+  }
+  if (activeBtn) {
+    requestAnimationFrame(() => activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
+  }
+}
+
 async function fetchMatches() {
   const res = await fetch(`/api/matches?date=${state.date}&tz=${encodeURIComponent(userTz)}`);
   if (!res.ok) {
