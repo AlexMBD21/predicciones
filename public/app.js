@@ -361,8 +361,40 @@ async function loadMatches(silent = false) {
             <span class="quota-badge-dot"></span>
             Modo Protección de Cuota
           </div>
-          <div class="quota-icon-wrap">
-            <div class="quota-icon">⏳</div>
+          <div class="quota-icon-wrap" aria-label="Reloj de arena animado">
+            <svg class="hourglass-svg" viewBox="0 0 56 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="sandGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#fef3c7"/>
+                  <stop offset="45%" stop-color="#fbbf24"/>
+                  <stop offset="100%" stop-color="#d97706"/>
+                </linearGradient>
+              </defs>
+              <g class="hourglass-rotator">
+                <!-- Cristal del reloj -->
+                <path class="glass-body" d="M14 9 L42 9 C42 22 32 32 29.5 35 L29.5 37 C32 40 42 50 42 63 L14 63 C14 50 24 40 26.5 37 L26.5 35 C24 32 14 22 14 9 Z" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" stroke-linejoin="round"/>
+                
+                <!-- Arena bulbo superior -->
+                <path class="sand-bulb-top" d="M16 11 L40 11 C40 21 31 31 28 35 C25 31 16 21 16 11 Z" fill="url(#sandGrad)"/>
+                
+                <!-- Chorro cayendo fase 1 (hacia abajo) -->
+                <line class="sand-stream-down" x1="28" y1="35" x2="28" y2="61" stroke="url(#sandGrad)" stroke-width="1.6" stroke-linecap="round"/>
+                
+                <!-- Chorro cayendo fase 2 (invertido) -->
+                <line class="sand-stream-up" x1="28" y1="37" x2="28" y2="11" stroke="url(#sandGrad)" stroke-width="1.6" stroke-linecap="round"/>
+                
+                <!-- Arena bulbo inferior -->
+                <path class="sand-bulb-bottom" d="M16 61 C16 52 24 43 28 38 C32 43 40 52 40 61 Z" fill="url(#sandGrad)"/>
+
+                <!-- Reflejos de cristal -->
+                <path d="M18 13 C18 22 25 29 27 34" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-linecap="round"/>
+                <path d="M18 59 C18 50 25 43 27 38" stroke="rgba(255,255,255,0.25)" stroke-width="1.2" stroke-linecap="round"/>
+
+                <!-- Tapas superior e inferior -->
+                <rect x="11" y="5" width="34" height="4.5" rx="2" fill="#334155" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+                <rect x="11" y="62.5" width="34" height="4.5" rx="2" fill="#334155" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+              </g>
+            </svg>
           </div>
           <h3 class="quota-title">Límite Diario de Consultas Alcanzado</h3>
           <p class="quota-desc">Has completado las <strong>100 peticiones gratuitas</strong> de API-Football para hoy. El sistema ha pausado las llamadas externas para proteger tu cuota.</p>

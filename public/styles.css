@@ -1497,33 +1497,83 @@ body.modal-open{overflow:hidden !important}
   z-index:1;
   display:inline-grid;
   place-items:center;
-  margin:0 auto 14px;
+  margin:0 auto 16px;
+  background:none !important;
+  border:none !important;
+  box-shadow:none !important;
 }
 
-.quota-icon-halo{
-  display:none !important;
-}
-
-.quota-icon{
-  font-size:3.2rem;
-  line-height:1;
-  display:inline-block;
+.hourglass-svg{
+  width:46px;
+  height:60px;
+  display:block;
   user-select:none;
-  transform-origin:center center;
-  animation:hourglassTurn 4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-  filter:none !important;
 }
 
-@keyframes hourglassTurn{
+.hourglass-rotator{
+  transform-origin:28px 36px;
+  animation:hourglassSpinPhysical 7s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+@keyframes hourglassSpinPhysical{
   0%, 35% {
     transform: rotate(0deg);
   }
-  50% {
+  43%, 85% {
     transform: rotate(180deg);
   }
-  85%, 100% {
+  93%, 100% {
     transform: rotate(360deg);
   }
+}
+
+.sand-bulb-top{
+  animation:sandTopFlow 7s ease-in-out infinite;
+}
+
+@keyframes sandTopFlow{
+  0%   { transform: scaleY(1); transform-origin: 28px 35px; }
+  30%  { transform: scaleY(0); transform-origin: 28px 35px; }
+  43%  { transform: scaleY(0); transform-origin: 28px 11px; }
+  50%  { transform: scaleY(0); transform-origin: 28px 11px; }
+  80%  { transform: scaleY(1); transform-origin: 28px 11px; }
+  93%  { transform: scaleY(1); transform-origin: 28px 11px; }
+  100% { transform: scaleY(1); transform-origin: 28px 35px; }
+}
+
+.sand-bulb-bottom{
+  animation:sandBottomFlow 7s ease-in-out infinite;
+}
+
+@keyframes sandBottomFlow{
+  0%   { transform: scaleY(0); transform-origin: 28px 61px; }
+  5%   { transform: scaleY(0); transform-origin: 28px 61px; }
+  30%  { transform: scaleY(1); transform-origin: 28px 61px; }
+  43%  { transform: scaleY(1); transform-origin: 28px 37px; }
+  50%  { transform: scaleY(1); transform-origin: 28px 37px; }
+  80%  { transform: scaleY(0); transform-origin: 28px 37px; }
+  93%  { transform: scaleY(0); transform-origin: 28px 61px; }
+  100% { transform: scaleY(0); transform-origin: 28px 61px; }
+}
+
+.sand-stream-down{
+  animation:sandStreamDownAnim 7s ease-in-out infinite;
+}
+
+@keyframes sandStreamDownAnim{
+  0%        { opacity: 0; stroke-dasharray: 4 2; }
+  3%, 27%   { opacity: 1; stroke-dasharray: 4 2; stroke-dashoffset: -20; }
+  30%, 100% { opacity: 0; }
+}
+
+.sand-stream-up{
+  animation:sandStreamUpAnim 7s ease-in-out infinite;
+}
+
+@keyframes sandStreamUpAnim{
+  0%, 49%   { opacity: 0; }
+  52%, 77%  { opacity: 1; stroke-dasharray: 4 2; stroke-dashoffset: -20; }
+  80%, 100% { opacity: 0; }
 }
 
 .quota-title{
