@@ -1501,13 +1501,15 @@ body.modal-open{overflow:hidden !important}
   background:none !important;
   border:none !important;
   box-shadow:none !important;
+  overflow:visible !important;
 }
 
 .hourglass-svg{
-  width:46px;
-  height:60px;
+  width:64px;
+  height:64px;
   display:block;
   user-select:none;
+  overflow:visible !important;
 }
 
 .hourglass-rotator{

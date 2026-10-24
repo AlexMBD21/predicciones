@@ -362,7 +362,7 @@ async function loadMatches(silent = false) {
             Modo Protección de Cuota
           </div>
           <div class="quota-icon-wrap" aria-label="Reloj de arena animado">
-            <svg class="hourglass-svg" viewBox="0 0 56 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg class="hourglass-svg" viewBox="-14 -6 84 84" fill="none" xmlns="http://www.w3.org/2000/svg">
               <defs>
                 <linearGradient id="sandGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stop-color="#fef3c7"/>
