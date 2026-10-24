@@ -71,6 +71,9 @@ export async function handler(req, res) {
     const sub = url.searchParams.get('path');
     if (sub) pathname = `/api/${sub}`;
   }
+  if (pathname.endsWith('.js')) {
+    pathname = pathname.slice(0, -3);
+  }
 
   try {
     if (req.method !== 'GET') return send(res, 405, { error: 'Método no permitido' });
