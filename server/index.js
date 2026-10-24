@@ -35,29 +35,59 @@ const send = (res, code, body) => {
     'Content-Type': 'application/json; charset=utf-8',
     'X-Content-Type-Options': 'nosniff',
     'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
   });
   res.end(JSON.stringify(body));
 };
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+export async function handler(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    });
+    return res.end();
+  }
+
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+  const proto = req.headers['x-forwarded-proto'] || 'http';
+  let url;
+  try {
+    url = new URL(req.url, `${proto}://${host}`);
+  } catch {
+    url = new URL('/', `http://${host}`);
+  }
+
+  // Resolver pathname compatible con Vercel rewrites y Serverless Functions
+  let pathname = url.pathname;
+  if (req.headers['x-matched-path']) {
+    try {
+      pathname = new URL(req.headers['x-matched-path'], 'http://localhost').pathname;
+    } catch {}
+  } else if (pathname.startsWith('/api/index')) {
+    const sub = url.searchParams.get('path');
+    if (sub) pathname = `/api/${sub}`;
+  }
+
   try {
     if (req.method !== 'GET') return send(res, 405, { error: 'Método no permitido' });
-    if (url.pathname.startsWith('/api/') && limited(req.socket.remoteAddress)) {
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress;
+    if (pathname.startsWith('/api/') && clientIp && limited(clientIp)) {
       return send(res, 429, { error: 'Demasiadas peticiones. Espera un minuto.' });
     }
-    if (url.pathname === '/api/status') {
+    if (pathname === '/api/status') {
       return send(res, 200, { provider: provider.name, gemini: !!process.env.GEMINI_API_KEY, supabase: isSupabaseConnected() });
     }
-    if (url.pathname === '/api/matches') {
+    if (pathname === '/api/matches') {
       const date = parseDate(url.searchParams.get('date'));
       const tz = url.searchParams.get('tz') || 'America/Bogota';
       try {
         const { fixtures, dropped } = cleanFixtures(await provider.getFixtures(date, tz));
         const now = Date.now();
         fixtures.forEach((f) => {
-          // Si el partido está como NS o TBD pero su fecha/hora de inicio ya llegó,
-          // promoverlo de forma automática a estado en progreso para ligas con retraso de API
           if ((f.status === 'NS' || f.status === 'TBD') && f.date) {
             const matchTime = new Date(f.date).getTime();
             const elapsed = Math.floor((now - matchTime) / 60000);
@@ -100,9 +130,15 @@ const server = http.createServer(async (req, res) => {
         throw err;
       }
     }
-    if (url.pathname === '/api/match') {
+    if (pathname === '/api/match') {
       const id = parseId(url.searchParams.get('id'));
-      const fx = fixturesById.get(id);
+      let fx = fixturesById.get(id);
+      if (!fx) {
+        try {
+          fx = await provider.getFixtureById(id);
+          if (fx) fixturesById.set(id, fx);
+        } catch {}
+      }
       if (!fx) return send(res, 404, { error: 'Partido no encontrado. Recarga la lista.' });
       let detail = { events: [], stats: [] };
       if (fx.status !== 'NS' && fx.status !== 'TBD') {
@@ -111,9 +147,15 @@ const server = http.createServer(async (req, res) => {
       const cachedPrediction = await getCachedPrediction(id, fx.status);
       return send(res, 200, { fixture: fx, events: detail.events, stats: detail.stats, cachedPrediction });
     }
-    if (url.pathname === '/api/predict') {
+    if (pathname === '/api/predict') {
       const id = parseId(url.searchParams.get('id'));
-      const fx = fixturesById.get(id);
+      let fx = fixturesById.get(id);
+      if (!fx) {
+        try {
+          fx = await provider.getFixtureById(id);
+          if (fx) fixturesById.set(id, fx);
+        } catch {}
+      }
       if (!fx) return send(res, 404, { error: 'Partido no encontrado. Recarga la lista.' });
 
       const force = url.searchParams.get('force') === '1';
@@ -142,7 +184,6 @@ const server = http.createServer(async (req, res) => {
         };
       }
       const prediction = validatePrediction(predict(ctx));
-      // La mala calidad de datos reduce la confianza (menos peso cuando ya hay marcador real)
       prediction.confidence = +(prediction.confidence * (ctx.live ? 1 : 0.6 + 0.4 * (report.score / 100))).toFixed(2);
       prediction.dataQuality = report;
       const ai = await explain(ctx, prediction);
@@ -156,12 +197,11 @@ const server = http.createServer(async (req, res) => {
         analysis: ai || templateExplanation(ctx, prediction),
         analysisSource: ai ? 'gemini' : 'modelo',
       };
-      // Guardar en SQLite y sincronizar en Supabase
       await savePrediction(id, fx.date, fx.status, payload);
       return send(res, 200, payload);
     }
-    // Archivos estáticos
-    const file = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
+    // Archivos estáticos (modo local)
+    const file = pathname === '/' ? '/index.html' : decodeURIComponent(pathname);
     const base = path.join(ROOT, 'public');
     const full = path.normalize(path.join(base, file));
     if (!full.startsWith(base)) return send(res, 403, { error: 'forbidden' });
@@ -175,9 +215,17 @@ const server = http.createServer(async (req, res) => {
     console.error(e);
     send(res, 502, { error: 'No se pudieron obtener o procesar los datos: ' + e.message });
   }
-});
+}
 
-server.listen(PORT, () => {
-  const supa = isSupabaseConnected() ? ' + Supabase ☁️' : '';
-  console.log(`⚽ Pronósticos en http://localhost:${PORT} [${provider.name}${supa}]`);
-});
+export const server = http.createServer(handler);
+
+// Iniciar servidor local solo si no estamos dentro del entorno serverless de Vercel
+if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  server.listen(PORT, () => {
+    const supa = isSupabaseConnected() ? ' + Supabase ☁️' : '';
+    console.log(`⚽ Pronósticos en http://localhost:${PORT} [${provider.name}${supa}]`);
+  });
+}
+
+export default handler;
+

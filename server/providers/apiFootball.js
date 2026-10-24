@@ -106,6 +106,14 @@ export async function getFixtures(date, timezone = 'America/Bogota') {
   return Array.from(map.values());
 }
 
+export async function getFixtureById(id) {
+  const data = await api(`/fixtures?id=${id}`, 2 * MIN).catch(() => null);
+  if (Array.isArray(data) && data[0]) {
+    return mapFixture(data[0]);
+  }
+  return null;
+}
+
 // Eventos (goles, tarjetas, cambios, VAR) y estadísticas del partido
 export async function getLive(fx) {
   const live = LIVE_SET.has(fx.status);

@@ -221,40 +221,33 @@ function badge(t, size = '') {
 }
 
 async function loadStatus() {
-  const s = await (await fetch('/api/status')).json();
-  const el = $('#status');
-  el.className = 'status-pill live';
-  el.textContent = `En vivo · ${s.provider}${s.gemini ? ' + Gemini' : ''}${s.supabase ? ' + Supabase ☁️' : ''}`;
-}
-
-function renderDates() {
-  const wrap = $('#dates');
-  wrap.innerHTML = '';
-  let activeBtn = null;
-  for (let i = -2; i <= 5; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    const dateStr = localIso(d);
-    const b = document.createElement('button');
-    const isActive = dateStr === state.date;
-    b.className = 'date-btn' + (isActive ? ' active' : '');
-    b.innerHTML = `<small>${i === 0 ? 'Hoy' : d.toLocaleDateString('es', { weekday: 'short' })}</small><strong>${d.getDate()}</strong>`;
-    b.onclick = () => {
-      state.date = dateStr;
-      persistState();
-      renderDates();
-      loadMatches();
-    };
-    wrap.appendChild(b);
-    if (isActive) activeBtn = b;
-  }
-  if (activeBtn) {
-    requestAnimationFrame(() => activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
-  }
+  try {
+    const res = await fetch('/api/status');
+    if (!res.ok) return;
+    const s = await res.json();
+    const el = $('#status');
+    if (el) {
+      el.className = 'status-pill live';
+      el.textContent = `En vivo · ${s.provider}${s.gemini ? ' + Gemini' : ''}${s.supabase ? ' + Supabase ☁️' : ''}`;
+    }
+  } catch {}
 }
 
 async function fetchMatches() {
-  const r = await (await fetch(`/api/matches?date=${state.date}&tz=${encodeURIComponent(userTz)}`)).json();
+  const res = await fetch(`/api/matches?date=${state.date}&tz=${encodeURIComponent(userTz)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = `Error del servidor (${res.status})`;
+    try {
+      const errJson = JSON.parse(text);
+      if (errJson.error) msg = errJson.error;
+    } catch {
+      if (res.status === 404) msg = 'Servidor no encontrado (404). Verifica que las rutas de la API estén desplegadas.';
+      else if (text) msg = text.slice(0, 120);
+    }
+    throw new Error(msg);
+  }
+  const r = await res.json();
   if (r.error) throw new Error(r.error);
   state.matches = r.matches || [];
   state.warning = r.warning || null;
@@ -332,7 +325,7 @@ async function loadMatches(silent = false) {
           <div class="quota-icon">⏳</div>
           <h3>Límite diario de API-Football alcanzado (100/día)</h3>
           <p>${esc(state.warning)}</p>
-          <small>La cuota se renueva a las 00:00 UTC. Todos los partidos y pronósticos analizados previamente continúan disponibles en la base de datos local SQLite.</small>
+          <small>La cuota se renueva a las 00:00 UTC. Todos los partidos y pronósticos analizados continúan disponibles y sincronizados en la nube con Supabase ☁️.</small>
         </div>`;
       return;
     }
